@@ -29,7 +29,15 @@
   "sugg_commands": true,
   "calculator": true,
   "shields_level": "standard",
-  "lists": {"default": true, "privacy": true, "cookies": true, "mobile": true, "fr": true, "annoyances": false, "social": false},
+  "lists": {
+    "default": true,
+    "privacy": true,
+    "cookies": true,
+    "mobile": true,
+    "fr": true,
+    "annoyances": false,
+    "social": false
+  },
   "custom_lists": "",
   "custom_rules": "",
   "https_upgrade": true,
@@ -38,7 +46,11 @@
   "block_pings": true,
   "tracking": "balanced",
   "noscript_sites": [],
-  "clear_on_exit": {"history": false, "cookies": false, "cache": false},
+  "clear_on_exit": {
+    "history": false,
+    "cookies": false,
+    "cache": false
+  },
   "passwords": true,
   "autofill": true,
   "suspend_bg": true,
@@ -49,5 +61,25 @@
   "gestures": true,
   "rocker": true,
   "autoplay_block": true,
-  "gpu": true
+  "gpu": true,
+  "hover_card": "preview",
+  "dev_mode": false,
+  "dev_modules": {
+    "js": true,
+    "tech": true,
+    "network": true,
+    "errors": true,
+    "docker": true,
+    "ports": true,
+    "perf": true,
+    "storage": true,
+    "responsive": true,
+    "tools": true,
+    "containers": true
+  },
+  "dev_envs": "",
+  "dev_containers": "Perso\nTravail\nDev\nProd",
+  "panels": [],
+  "panel_width": 420,
+  "sync_folder": ""
 }

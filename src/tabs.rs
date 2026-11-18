@@ -23,6 +23,9 @@ pub struct Tab {
     pub stack: Option<TabId>,
     #[serde(default)]
     pub pinned: bool,
+    /// Session container (isolated cookies and storage), developer mode.
+    #[serde(default)]
+    pub container: Option<String>,
     #[serde(skip)]
     pub private: bool,
     /// A live WebView2 exists for this tab.

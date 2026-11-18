@@ -122,6 +122,13 @@ html[data-nodim] .tab.unloaded .fav, html[data-nodim] .tab.unloaded .title { fil
 .tab.loading .fav { background: none; border: 1.5px solid var(--line); border-top-color: var(--ember); border-radius: 50%; animation: spin .8s linear infinite; }
 .tab.loading .fav > * { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.tab.enter { animation: tab-in .2s var(--ease) both; }
+@keyframes tab-in { from { opacity: 0; transform: translateY(6px) scale(.96); } }
+#vlist .tab.enter { animation-name: tab-in-v; }
+@keyframes tab-in-v { from { opacity: 0; transform: translateX(-8px); } }
+.tab.leave { pointer-events: none; transition: opacity .14s ease-out, transform .14s ease-out, width .15s var(--ease), min-width .15s var(--ease), padding .15s var(--ease); opacity: 0; transform: scale(.94); }
+#tabs .tab.leave { width: 0; min-width: 0; padding: 0; }
+#vlist .tab.leave { height: 0; transition-property: opacity, transform, height; }
 .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); }
 .tab .badge { font-size: 11px; font-weight: 600; color: var(--ink-2); background: var(--field); border-radius: 6px; padding: 0 5px; line-height: 16px; }
 .tab.stack { box-shadow: inset 0 2px 0 -0.5px var(--ink-3); }
@@ -201,11 +208,11 @@ html[data-vtabs] #tabs, html[data-vtabs] #newtab, html[data-vtabs] #stackbar { d
 #vnew { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: var(--r); color: var(--ink-2); margin-top: 4px; }
 #vnew:hover { background: var(--hover); color: var(--ink); }
 #content { flex: 1; position: relative; min-width: 0; background: var(--raised); }
-#veil { position: absolute; inset: 0; background: var(--ground) center / cover no-repeat; opacity: 0; transition: opacity .18s var(--ease); }
-#veil.img { filter: blur(20px) saturate(1.1); transform: scale(1.04); }
-html[data-overlay]:not([data-blank]) #veil { opacity: 1; }
+#veil { position: absolute; inset: 0; background: var(--ground) top left / 100% 100% no-repeat; opacity: 0; transition: filter .22s var(--ease), transform .22s var(--ease); }
+html[data-overlay]:not([data-blank]) #veil.img { opacity: 1; }
+html[data-overlay=heavy] #veil.img { filter: blur(20px) saturate(1.1); transform: scale(1.04); }
 #veil-tint { position: absolute; inset: 0; background: var(--veil); opacity: 0; transition: opacity .18s; pointer-events: none; }
-html[data-overlay] #veil-tint { opacity: 1; }
+html[data-overlay=heavy] #veil-tint { opacity: 1; }
 
 .popover {
   position: fixed; z-index: 10; display: none; background: var(--raised); border-radius: 12px; box-shadow: var(--shadow);
@@ -307,6 +314,7 @@ input[type=checkbox] { accent-color: var(--ember); width: 15px; height: 15px; }
 #ntp { position: absolute; inset: 0; display: none; overflow-y: auto; background: var(--ground); }
 html[data-blank] #ntp { display: block; }
 #ntp .wrap { max-width: 720px; margin: 0 auto; padding: 9vh 24px 48px; }
+#ntp .ntplogo { display: block; margin: 0 auto 28px; width: 64px; height: 64px; filter: drop-shadow(0 6px 18px oklch(0.45 0.18 255 / 0.35)); }
 #ntp .stat { display: flex; gap: 48px; justify-content: center; text-align: center; margin-bottom: 56px; }
 #ntp .stat b { display: block; font-size: 40px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.05; }
 #ntp .stat span { color: var(--ink-2); }
@@ -323,6 +331,94 @@ html[data-blank] #ntp { display: block; }
 
 #toast { position: fixed; left: 50%; bottom: 24px; z-index: 20; transform: translate(-50%, 12px); opacity: 0; padding: 10px 16px; border-radius: 10px; background: var(--ink); color: var(--ground); box-shadow: var(--shadow); transition: opacity .2s, transform .3s var(--ease); pointer-events: none; }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+
+/* Side panels (web apps, docked apps, developer mode) */
+#side { position: relative; flex: none; display: flex; flex-direction: column; width: 420px; background: var(--raised); border-left: 1px solid var(--line); min-width: 0; }
+#sidehead { display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line); flex: none; }
+#sidetitle { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sidebody { flex: 1; min-height: 0; position: relative; }
+#sidebody.dev { display: flex; flex-direction: column; overflow: hidden; }
+#sidegrip { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: ew-resize; z-index: 2; }
+#panelbar { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 46px; flex: none; padding: 8px 0; background: var(--ground); border-left: 1px solid var(--line); }
+#panelbar hr { width: 22px; border: 0; border-top: 1px solid var(--line); margin: 2px 0; }
+.pbtn { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; color: var(--ink-2); position: relative; }
+.pbtn:hover { background: var(--hover); color: var(--ink); }
+.pbtn.on { background: var(--ember-soft); color: var(--ink); }
+.pbtn.on::before { content: ""; position: absolute; right: -6px; top: 8px; bottom: 8px; width: 3px; border-radius: 3px; background: var(--ember); }
+.pbtn .fav { width: 20px; height: 20px; }
+.pbtn .fav img { width: 20px; height: 20px; }
+.pico { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
+.pico.app { background: var(--ember); color: var(--on-ember); }
+#panelPop { width: 440px; max-height: calc(100vh - 120px); overflow-y: auto; padding: 16px; }
+#panelPop h2 { margin: 0 0 12px; font-size: 15px; }
+.presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.preset { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px; border-radius: 10px; background: var(--field); font-size: 12px; }
+.preset:hover { background: var(--field-hover); }
+.preset .fav, .preset .fav img { width: 22px; height: 22px; }
+.applist { display: grid; gap: 4px; margin-top: 8px; }
+.applist .row { background: var(--field); }
+.tag { font-size: 10.5px; font-weight: 700; color: var(--ember); border: 1px solid currentColor; border-radius: 5px; padding: 0 4px; margin-left: 4px; }
+.muted { color: var(--ink-3); }
+.small { font-size: 12px; }
+.pad { padding: 16px; }
+/* Hover card (Brave) */
+#hovercard { position: fixed; z-index: 30; width: 280px; display: none; background: var(--raised); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; pointer-events: none; animation: pop .15s var(--ease); }
+#hovercard.on { display: block; }
+#hovercard .thumb { height: 158px; background: var(--field); display: grid; place-items: center; color: var(--ink-3); overflow: hidden; }
+#hovercard .thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+#hovercard .thumb span { display: flex; align-items: center; gap: 6px; }
+#hovercard .hc { display: grid; gap: 2px; padding: 10px 12px 12px; }
+#hovercard .hc b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#hovercard .mem { margin-top: 6px; font-size: 12px; color: var(--ink-2); }
+#hovercard .hcerr { font-size: 12px; color: oklch(0.6 0.2 25); }
+/* Tab extras */
+.tab.ct { box-shadow: inset 0 -2px 0 var(--ct); }
+.errdot { width: 7px; height: 7px; border-radius: 50%; background: oklch(0.62 0.22 25); flex: none; }
+#jsbtn { width: 34px; font: 700 11px var(--font); letter-spacing: .02em; color: var(--ink-2); }
+#jsbtn.off { color: oklch(0.6 0.2 25); text-decoration: line-through; text-decoration-thickness: 2px; }
+/* Developer panel */
+.devnav { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px; border-bottom: 1px solid var(--line); flex: none; }
+.devnav button { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 7px; color: var(--ink-2); font-size: 12px; }
+.devnav button:hover { background: var(--hover); color: var(--ink); }
+.devnav button.on { background: var(--ember-soft); color: var(--ink); font-weight: 600; }
+.devnav svg { width: 14px; height: 14px; }
+.devbody { flex: 1; overflow: auto; padding: 10px 12px 16px; user-select: text; }
+.devbody h4 { margin: 14px 0 6px; font-size: 12px; color: var(--ink-3); font-weight: 600; }
+.devbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.devbar .in { flex: 1; }
+.drow { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 2px 0; border-bottom: 1px solid var(--line); }
+.drow .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drow .k { color: var(--ink-2); white-space: nowrap; }
+.drow .port { min-width: 52px; font-variant-numeric: tabular-nums; }
+.mono { font: 11.5px ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.ticon { width: 16px; height: 16px; flex: none; }
+table.net { width: 100%; border-collapse: collapse; font-size: 11.5px; table-layout: fixed; }
+table.net th { text-align: left; color: var(--ink-3); font-weight: 600; padding: 4px; border-bottom: 1px solid var(--line); }
+table.net th:nth-child(1) { width: 52px; } table.net th:nth-child(2) { width: 72px; } table.net th:nth-child(4) { width: 60px; } table.net th:nth-child(5) { width: 40px; } table.net th:nth-child(6) { width: 70px; }
+table.net td { padding: 3px 4px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+table.net tr.blocked td { color: var(--ink-3); text-decoration: line-through; }
+table.net tr.bad td:first-child { color: oklch(0.6 0.2 25); font-weight: 600; }
+table.net .acts button { width: 20px; height: 20px; border-radius: 5px; display: inline-grid; place-items: center; color: var(--ink-3); }
+table.net .acts button:hover { background: var(--hover); color: var(--ink); }
+table.net .acts svg { width: 12px; height: 12px; }
+.errrow { padding: 8px 0; border-bottom: 1px solid var(--line); font: 12px ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+.card { padding: 10px; border-radius: 10px; background: var(--field); margin-bottom: 8px; }
+.ctop { display: flex; align-items: center; gap: 8px; }
+.cact { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.grow { flex: 1; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.dot.ok { background: oklch(0.68 0.17 150); }
+.chipbtn { height: 26px; padding: 0 10px; border-radius: 13px; background: var(--field); font-size: 12px; }
+.chipbtn:hover { background: var(--field-hover); }
+.chipbtn.on { background: var(--ember-soft); font-weight: 600; }
+.card .chipbtn { background: var(--raised); }
+pre.logs { max-height: 320px; overflow: auto; margin: 8px 0 0; padding: 8px; border-radius: 8px; background: var(--ground); font: 11.5px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
+.kpi { padding: 8px; border-radius: 8px; background: var(--field); text-align: center; }
+.kpi b { display: block; font-size: 16px; }
+.kpi span { font-size: 11px; color: var(--ink-3); }
+.kpi.good b { color: oklch(0.62 0.15 150); } .kpi.mid b { color: oklch(0.7 0.15 75); } .kpi.bad b { color: oklch(0.6 0.2 25); }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
@@ -398,6 +494,7 @@ html[data-blank] #ntp { display: block; }
           <button class="icon" id="star" title="Ajouter aux favoris (Ctrl+D)" aria-label="Favori"><svg><use href="#i-star"/></svg></button>
         </div>
       </div>
+      <button class="icon" id="jsbtn" hidden aria-label="JavaScript sur ce site">JS</button>
       <button class="icon" id="shield" title="Shields" aria-label="Shields"><svg><use href="#i-shield"/></svg><span class="count" hidden></span></button>
       <button class="icon" id="menubtn" title="Menu" aria-label="Menu"><svg><use href="#i-menu"/></svg></button>
     </div>
@@ -412,6 +509,7 @@ html[data-blank] #ntp { display: block; }
     <section id="content">
       <div id="veil"></div><div id="veil-tint"></div>
       <div id="ntp"><div class="wrap">
+        <img class="ntplogo" src="__LOGO__" alt="Leirk" width="64" height="64">
         <div class="stat">
           <div><b class="ember" id="ntpBlocked">0</b><span>pubs et traqueurs bloqués</span></div>
           <div><b id="ntpTabs">1</b><span>onglets ouverts</span></div>
@@ -422,6 +520,15 @@ html[data-blank] #ntp { display: block; }
         <div class="note">F2 ou Ctrl+K : onglets, favoris, historique, calculs et commandes au même endroit.</div>
       </div></div>
     </section>
+    <aside id="side" hidden aria-label="Panneau latéral">
+      <div id="sidegrip"></div>
+      <div id="sidehead"><span id="sidetitle"></span>
+        <button class="icon" id="sideReload" title="Recharger" aria-label="Recharger le panneau"><svg><use href="#i-reload"/></svg></button>
+        <button class="icon" id="sideUnload" title="Fermer et libérer la mémoire" aria-label="Libérer la mémoire"><svg><use href="#i-moon"/></svg></button>
+        <button class="icon" id="sideClose" title="Fermer" aria-label="Fermer le panneau"><svg><use href="#i-x"/></svg></button></div>
+      <div id="sidebody"></div>
+    </aside>
+    <nav id="panelbar" aria-label="Panneaux"></nav>
   </div>
 </div>
 
@@ -449,6 +556,8 @@ html[data-blank] #ntp { display: block; }
   <nav id="setnav"><input class="in" id="setsearch" placeholder="Rechercher un réglage" aria-label="Rechercher un réglage"><div id="setsections"></div></nav>
   <div id="setbody"></div>
 </div>
+<div class="popover" id="panelPop" role="dialog" aria-label="Ajouter un panneau"></div>
+<div id="hovercard" role="tooltip"></div>
 <div id="toast" role="status"></div>
 
 <script>
@@ -462,7 +571,7 @@ const hostOf = u => { try { return new URL(u).host.replace(/^www\./, ""); } catc
 const root = document.documentElement;
 
 let S = { tabs: [], active: 0, tiled: [], url: "", shields: {}, prefs: {}, engines: [], lists: [] };
-let BM = [], FAV = {};
+let BM = [], FAV = {}, bmVersion = 0, barSig = "";
 const sel = new Set();
 let paletteMode = false, openPop = null, seq = 0, items = [], hi = 0, editing = false, lastResults = { bookmarks: [], history: [] }, lastRect = "";
 const P = k => S.prefs[k];
@@ -478,9 +587,9 @@ function fav(t) {
 }
 const tabTitle = t => t.title || (t.url ? hostOf(t.url) : "Nouvel onglet");
 function sendLayout() {
-  const r = $("#content").getBoundingClientRect();
-  const key = [r.left, r.top, r.width, r.height].map(Math.round).join();
-  if (key !== lastRect) { lastRect = key; send("layout", { x: r.left, y: r.top, w: r.width, h: r.height }); }
+  const r = $("#content").getBoundingClientRect(), s = window.sideRect ? sideRect() : { sx: 0, sy: 0, sw: 0, sh: 0 };
+  const key = [r.left, r.top, r.width, r.height, s.sx, s.sy, s.sw, s.sh].map(Math.round).join();
+  if (key !== lastRect) { lastRect = key; send("layout", { x: r.left, y: r.top, w: r.width, h: r.height, ...s }); }
 }
 
 /* ---------- state pushed by Rust ---------- */
@@ -495,13 +604,21 @@ window.L = {
     if (openPop === "shieldsPanel") renderShields();
     if (openPop === "settings") renderSettings(false);
     syncOverlay();
+    if (window.renderExtras) renderExtras();
   },
-  bookmarks(list) { BM = list; renderBookmarksBar(); if (openPop === "settings") renderSettings(false); },
-  favicons(map) { FAV = map; renderTabs(); renderBookmarksBar(); renderNtp(); },
+  bookmarks(list) { BM = list; bmVersion++; renderBookmarksBar(); if (openPop === "settings") renderSettings(false); },
+  favicons(map) { FAV = map; bmVersion++; renderTabs(); renderBookmarksBar(); renderNtp(); },
   focus() { focusField(); },
   palette() { openSheet(true); },
   results(n, r) { if (n === seq) { lastResults = r; build(); } },
-  backdrop(src) { if (openPop) { const v = $("#veil"); v.style.backgroundImage = `url(${src})`; v.classList.add("img"); } },
+  backdrop(src) {
+    if (!openPop) return;
+    const img = new Image();
+    // cover the page only once its snapshot is decoded: the swap is then invisible
+    img.onload = () => { if (!openPop) return; const v = $("#veil"); v.style.backgroundImage = `url(${src})`; v.classList.add("img"); requestAnimationFrame(() => requestAnimationFrame(() => send("raise"))); };
+    img.onerror = () => send("raise");
+    img.src = src;
+  },
   imports(list) {
     const box = $("#importList"); if (!box) return;
     box.innerHTML = list.length
@@ -526,7 +643,11 @@ function applyPrefs() {
   root.toggleAttribute("data-closeall", P("close_btn") === "always");
   $("#home").hidden = !P("show_home");
 }
-function syncOverlay() { root.toggleAttribute("data-overlay", !!openPop); }
+const HEAVY = ["sheet", "settings", "panelPop"];
+function syncOverlay() {
+  if (openPop) root.dataset.overlay = HEAVY.includes(openPop) ? "heavy" : "light";
+  else delete root.dataset.overlay;
+}
 
 /* ---------- tabs ---------- */
 function renderTabs() {
@@ -540,6 +661,7 @@ function renderTabs() {
     }).join("");
     $("#vlist .tab.active")?.scrollIntoView({ block: "nearest" });
     $("#tabs").innerHTML = ""; $("#stackbar").classList.remove("on");
+    markEntering();
     return sendLayout();
   }
   $("#vlist").innerHTML = "";
@@ -560,18 +682,35 @@ function renderTabs() {
   const sb = $("#stackbar"), inStack = activeTab && activeTab.stack != null;
   sb.classList.toggle("on", !!inStack);
   sb.innerHTML = inStack ? S.tabs.filter(m => m.stack === activeTab.stack).map(m => tabHtml(m, 0, m.id === S.active, true)).join("") : "";
+  markEntering();
   sendLayout();
 }
 function tabHtml(t, count, active, member, indent) {
   const c = ["tab", active && "active", !t.loaded && t.url && "unloaded", t.loading && "loading", t.pinned && !member && "pinned",
-    sel.has(t.id) && "sel", count && "stack", t.private && "priv", indent && "indent"].filter(Boolean).join(" ");
-  const tip = P("tooltips") === false ? "" : `title="${esc(tabTitle(t) + (t.url ? "\n" + t.url : "") + (!t.loaded && t.url ? "\nDéchargé de la mémoire" : ""))}"`;
-  return `<div class="${c}" role="tab" aria-selected="${active}" data-id="${t.id}" ${tip}>
+    sel.has(t.id) && "sel", count && "stack", t.private && "priv", indent && "indent", leaving.has(t.id) && "leave"].filter(Boolean).join(" ");
+  const x = window.tabExtra ? tabExtra(t) : { cls: "", style: "", html: "" };
+  const tip = P("tooltips") === false || P("hover_card") !== "off" ? "" : `title="${esc(tabTitle(t) + (t.url ? "\n" + t.url : "") + (!t.loaded && t.url ? "\nDéchargé de la mémoire" : ""))}"`;
+  return `<div class="${c}${x.cls}" style="${x.style}" role="tab" aria-selected="${active}" data-id="${t.id}" ${tip}>
     ${t.private ? `<span class="fav">${icon("mask")}</span>` : fav(t)}
     <span class="title">${esc(tabTitle(t))}</span>
-    ${t.audible ? `<span class="snd">${icon("sound")}</span>` : ""}
+    ${x.html}${t.audible ? `<span class="snd">${icon("sound")}</span>` : ""}
     ${count ? `<span class="badge">${count}</span>` : ""}
     <button class="x" data-close="${t.id}" aria-label="Fermer l'onglet">${icon("x")}</button></div>`;
+}
+/* Sober tab motion: new tabs fade and rise in, closed tabs fold away before they are removed. */
+const leaving = new Set();
+let knownTabs = null;
+const calm = () => root.hasAttribute("data-noanim") || matchMedia("(prefers-reduced-motion: reduce)").matches;
+function closeTab(id) {
+  if (calm()) return send("close", id);
+  leaving.add(id);
+  document.querySelectorAll(`.tab[data-id="${id}"]`).forEach(el => el.classList.add("leave"));
+  setTimeout(() => { leaving.delete(id); send("close", id); }, 150);
+}
+function markEntering() {
+  const ids = new Set(S.tabs.map(t => t.id));
+  if (knownTabs && !calm()) document.querySelectorAll(".tab[data-id]").forEach(el => { if (!knownTabs.has(+el.dataset.id)) el.classList.add("enter"); });
+  knownTabs = ids;
 }
 const tabFromEvent = e => { const el = e.target.closest(".tab"); return el ? { el, id: +el.dataset.id } : null; };
 
@@ -579,13 +718,14 @@ for (const bar of [$("#tabs"), $("#stackbar"), $("#vlist")]) {
   bar.addEventListener("mousedown", e => {
     const t = tabFromEvent(e);
     if (!t) return;
-    if (e.button === 1) { e.preventDefault(); send("close", t.id); return; }
-    if (e.button !== 0 || e.target.closest(".x")) return;
+    if (e.button === 1) { e.preventDefault(); closeTab(t.id); return; }
+    if (e.button === 0 && e.target.closest(".x")) { e.preventDefault(); closeTab(t.id); return; }
+    if (e.button !== 0) return;
     if (e.ctrlKey) { sel.has(t.id) ? sel.delete(t.id) : sel.add(t.id); renderTabs(); renderToolbar(); return; }
-    if (e.detail === 2 && P("dbl_close")) { send("close", t.id); return; }
+    if (e.detail === 2 && P("dbl_close")) { closeTab(t.id); return; }
     startDrag(e, t, bar.id === "vlist");
   });
-  bar.addEventListener("click", e => { const x = e.target.closest("[data-close]"); if (x) send("close", +x.dataset.close); });
+
   bar.addEventListener("contextmenu", e => { const t = tabFromEvent(e); if (t) { e.preventDefault(); tabMenu(t.id, e.clientX, e.clientY); } });
 }
 $("#tabs").addEventListener("wheel", e => {
@@ -638,8 +778,9 @@ function tabMenu(id, x, y) {
     t.stack != null && ["stack", "Retirer de la pile", () => send("unstack", id)],
     ["pin", t.pinned ? "Détacher l'onglet" : "Épingler l'onglet", () => send("pin", id)],
     t.loaded && id !== S.active && ["moon", "Décharger de la mémoire", () => send("unload", id)],
+    ...(window.tabMenuExtra ? tabMenuExtra(id) : []),
     "-",
-    ["x", "Fermer l'onglet", () => send("close", id), "Ctrl+W"],
+    ["x", "Fermer l'onglet", () => closeTab(id), "Ctrl+W"],
   ].filter(Boolean), x, y);
 }
 
@@ -695,6 +836,9 @@ function renderBookmarksBar() {
   const mode = P("bookmarks_bar"), bar = $("#bmbar");
   const show = mode === "always" || (mode === "ntp" && !S.url);
   bar.hidden = !show;
+  const sig = [show, bmVersion, innerWidth, P("tabs_position"), P("density")].join();
+  if (sig === barSig) return;
+  barSig = sig;
   if (show) {
     const tops = []; const seenF = new Set();
     for (const b of BM) {
@@ -718,13 +862,18 @@ function folderEntries(path) {
     if (b.folder === path) out.push(["", b.title || b.url, () => bmOpen(b.url), "", fav(b), { url: b.url }]);
     else if (b.folder.startsWith(path + "/")) subs.add(b.folder.slice(path.length + 1).split("/")[0]);
   }
-  const dirs = [...subs].sort().map(s => ["folder", s, () => setTimeout(() => showFolder(path + "/" + s, lastMenuPos.x, lastMenuPos.y)), "›"]);
+  const dirs = [...subs].sort().map(s => ["folder", s, () => showFolder(path + "/" + s, lastMenuPos.x, lastMenuPos.y), "›", null, null, "stay"]);
   const urls = BM.filter(b => b.folder === path || b.folder.startsWith(path + "/")).map(b => b.url);
   return [...dirs, ...(dirs.length && out.length ? ["-"] : []), ...out, "-",
     ["newtab", `Tout ouvrir (${urls.length})`, () => urls.forEach(u => send("openBg", u))]];
 }
 let lastMenuPos = { x: 0, y: 0 };
-function showFolder(path, x, y) { lastMenuPos = { x, y }; showMenu("#menu", folderEntries(path), x, y); }
+function showFolder(path, x, y) {
+  lastMenuPos = { x, y };
+  const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : null;
+  const back = parent ? [["back", parent.split("/").pop(), () => showFolder(parent, x, y), "", null, null, "stay"], "-"] : [];
+  showMenu("#menu", [...back, ...folderEntries(path)], x, y);
+}
 $("#bmbar").addEventListener("click", e => {
   const b = e.target.closest(".bm,#bmmore"); if (!b) return;
   const r = b.getBoundingClientRect();
@@ -733,7 +882,7 @@ $("#bmbar").addEventListener("click", e => {
   if (b.id === "bmmore") {
     const items = [...document.querySelectorAll("#bmbar .bm[hidden]")].map(el => el.dataset.url
       ? ["", el.dataset.title, () => bmOpen(el.dataset.url), "", el.querySelector(".fav")?.outerHTML, { url: el.dataset.url }]
-      : ["folder", el.dataset.folder, () => setTimeout(() => showFolder(el.dataset.folder, r.left - 200, r.bottom + 4)), "›"]);
+      : ["folder", el.dataset.folder, () => showFolder(el.dataset.folder, r.right - 280, r.bottom + 4), "›", null, null, "stay"]);
     showMenu("#menu", items, r.right - 280, r.bottom + 4);
   }
 });
@@ -846,6 +995,7 @@ function build() {
     const v = fmtNum(lastResults.calc);
     groups.push(["", [{ icon: "cmd", t: "= " + v, u: "", k: "Copier le résultat", cls: "calc", act: () => { navigator.clipboard?.writeText(String(lastResults.calc)); toast(`${v} copié`); } }]]);
   }
+  if (window.extraGroups) extraGroups(q, groups);
   if (q) {
     const [kw, ...rest] = q.split(/\s+/);
     const eng = rest.length && S.engines.find(e => e.keyword.toLowerCase() === kw.replace(/^!/, "").toLowerCase());
@@ -869,6 +1019,7 @@ function build() {
       .map(h => ({ fav: h, t: h.title || h.url, u: h.url, k: "", act: nt => send(nt ? "open" : "nav", h.url) }));
     if (hist.length) groups.push(["Historique", hist]);
   }
+  if (window.lateGroups) lateGroups(q, groups);
   if (P("sugg_commands") !== false || paletteMode) {
     const cmds = COMMANDS.filter(c => (!c[4] || c[4]()) && (!q || match(q, c[1]))).slice(0, q ? 5 : 99).map(c => ({ icon: c[0], t: c[1], u: "", k: c[3] || "", act: c[2] }));
     // F2 is Vivaldi's Quick Commands: actions lead; Ctrl+L stays an address bar.
@@ -905,7 +1056,7 @@ function show(id) {
   openPop = id;
   $("#" + id).classList.add("on");
   syncOverlay();
-  if (!was) send("overlay", true);
+  if (!was) { send("overlay", true); setTimeout(() => { if (openPop) send("raise"); }, 350); }
 }
 function closeAll() {
   if (!openPop) return;
@@ -929,7 +1080,12 @@ function showMenu(id, entries, x, y, anchor) {
   const box = $(id);
   box.innerHTML = entries.map((e, i) => e === "-" ? "<hr>" : `<button class="row" role="menuitem" data-i="${i}">${e[4] || (e[0] ? icon(e[0]) : "")}<span class="t">${esc(e[1])}</span><span class="k">${e[3] || ""}</span></button>`)
     .join("").replace(/(<hr>)+/g, "<hr>").replace(/^<hr>|<hr>$/g, "");
-  box.onclick = ev => { const r = ev.target.closest("[data-i]"); if (r) { const fn = entries[+r.dataset.i][2]; closeAll(); fn(); } };
+  box.onclick = ev => {
+    const r = ev.target.closest("[data-i]"); if (!r) return;
+    const e = entries[+r.dataset.i];
+    if (e[6] !== "stay") closeAll();
+    e[2]();
+  };
   box.onauxclick = ev => { const r = ev.target.closest("[data-i]"); const e = r && entries[+r.dataset.i]; if (ev.button === 1 && e?.[5]?.url) { send("openBg", e[5].url); } };
   show(id.slice(1));
   place(id, anchor, false, x, y);
@@ -943,6 +1099,8 @@ $("#menubtn").onclick = () => openPop === "menu" ? closeAll() : showMenu("#menu"
   ["cmd", "Commandes rapides", () => openSheet(true), "F2"],
   ["star", "Barre de favoris", () => send("toggleBar"), "Ctrl+Maj+B"],
   ["download", "Téléchargements", () => send("downloads"), "Ctrl+J"],
+  ["download", "Capture de la page entière", () => send("capture"), "Ctrl+Maj+S"],
+  ["tabs", "Panneaux latéraux", () => openSettings("panels")],
   ["moon", "Décharger les autres onglets", () => send("unloadOthers")],
   "-",
   ["import", "Importer favoris et historique", () => openSettings("import")],
@@ -1076,7 +1234,7 @@ const SECTIONS = [
 const KEYS = [["Nouvel onglet", "Ctrl+T"], ["Onglet privé", "Ctrl+Maj+N"], ["Fermer l'onglet", "Ctrl+W"], ["Rouvrir l'onglet fermé", "Ctrl+Maj+T"],
   ["Onglet suivant / précédent", "Ctrl+Tab · Ctrl+Maj+Tab"], ["Aller à l'onglet 1…8 / dernier", "Ctrl+1…8 / Ctrl+9"], ["Barre d'adresse", "Ctrl+L · Alt+D · F6"],
   ["Commandes rapides", "F2 · Ctrl+K"], ["Ajouter aux favoris", "Ctrl+D"], ["Barre de favoris", "Ctrl+Maj+B"], ["Téléchargements", "Ctrl+J"],
-  ["Rechercher dans la page", "Ctrl+F"], ["Zoom", "Ctrl+molette · Ctrl+= / Ctrl+-"], ["Accueil", "Alt+Origine"], ["Outils de développement", "F12"],
+  ["Rechercher dans la page", "Ctrl+F"], ["Capture de la page entière", "Ctrl+Maj+S"], ["Zoom", "Ctrl+molette · Ctrl+= / Ctrl+-"], ["Accueil", "Alt+Origine"], ["Outils de développement", "F12"],
   ["Page précédente / suivante", "Alt+← / Alt+→"]];
 let setSection = "general";
 function openSettings(section) {
@@ -1118,7 +1276,7 @@ function itemHtml(it) {
     case "import": return `<div class="set col"><div><div>Importez favoris, historique et moteurs de recherche.</div><small>Les mots de passe ne peuvent pas être importés : Chrome, Brave et Edge les chiffrent avec une clé réservée à eux.</small></div><div id="importList"><small>Recherche des navigateurs…</small></div><div><button class="btn primary" id="importAll">Tout importer</button></div></div>`;
     case "keys": return `<div class="keys">${KEYS.map(([a, b]) => `<span>${esc(a)}</span><kbd>${esc(b)}</kbd>`).join("")}</div>`;
   }
-  return "";
+  return window.customItem ? customItem(it) : "";
 }
 function renderSettings(full) {
   const q = $("#setsearch").value.trim();
@@ -1202,5 +1360,6 @@ new ResizeObserver(sendLayout).observe($("#content"));
 sendLayout();
 addEventListener("load", () => { if (!S.url) focusField(); });
 </script>
+<!--EXTRA-->
 </body>
 </html>

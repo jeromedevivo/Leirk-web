@@ -29,6 +29,9 @@ pub struct Profile {
     pub vertical_tabs: bool,
     /// Saved settings; read through [`merged_prefs`].
     pub prefs: serde_json::Value,
+    pub prefs_ts: i64,
+    /// Deleted bookmark URLs with the deletion time, for sync.
+    pub deleted: Vec<(String, i64)>,
 }
 
 impl Default for Profile {
@@ -42,6 +45,8 @@ impl Default for Profile {
             shields_off: vec![],
             vertical_tabs: false,
             prefs: serde_json::json!({}),
+            prefs_ts: 0,
+            deleted: vec![],
         }
     }
 }

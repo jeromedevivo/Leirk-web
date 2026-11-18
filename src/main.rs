@@ -33,6 +33,10 @@ use wry::{
     WebViewExtWindows,
 };
 
+mod devhost;
+mod panels;
+mod synchost;
+
 enum Ev {
     Ui(String),
     Title(TabId, String),
@@ -50,6 +54,11 @@ enum Ev {
     Gesture(String),
     Navigate(TabId, String),
     Quit,
+    /// Developer-mode results computed off the UI thread, forwarded to the chrome as `L.dev(kind, data)`.
+    Dev(String, Value),
+    TechDb(std::sync::Arc<leirk::tech::Db>),
+    Thumb(TabId, String),
+    Repaint,
 }
 
 const TICK: Duration = Duration::from_secs(30);
@@ -77,6 +86,7 @@ fn shortcut(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'static str>
         (true, true, false, _) if key == 'N' => "private",
         (true, true, false, _) if key == 'T' => "reopen",
         (true, true, false, _) if key == 'B' => "toggleBar",
+        (true, true, false, _) if key == 'S' => "capture",
         (true, false, false, 0x09) => "next",
         (true, true, false, 0x09) => "prev",
         (true, false, false, 0x22) => "next", // Ctrl+PageDown
@@ -87,6 +97,14 @@ fn shortcut(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'static str>
         (false, false, false, 0x75) => "focus",   // F6
         _ => return None,
     })
+}
+
+/// Window and taskbar icon, decoded from the shipped PNG.
+fn app_icon() -> Option<tao::window::Icon> {
+    let mut reader = png::Decoder::new(std::io::Cursor::new(include_bytes!("../assets/icon-64.png"))).read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    tao::window::Icon::from_rgba(buf[..info.buffer_size()].to_vec(), info.width, info.height).ok()
 }
 
 /// Vivaldi's default gestures (hold right button and draw) plus rocker gestures B/F.
@@ -204,6 +222,10 @@ struct Shared {
     doc_scripts: RefCell<HashMap<TabId, String>>,
     upgraded: RefCell<HashMap<TabId, String>>,
     http_only: RefCell<HashSet<String>>,
+    /// Developer mode: per-tab request log, JS errors, main document headers.
+    netlog: RefCell<HashMap<TabId, std::collections::VecDeque<Value>>>,
+    errors: RefCell<HashMap<TabId, Vec<Value>>>,
+    doc_headers: RefCell<HashMap<TabId, Vec<(String, String)>>>,
 }
 
 impl Shared {
@@ -252,6 +274,8 @@ struct App {
     loading: HashSet<TabId>,
     content: (f64, f64, f64, f64),
     overlay: bool,
+    /// Overlay opened, waiting for the page snapshot before covering the page.
+    awaiting_backdrop: bool,
     dirty: bool,
     bookmarks_dirty: bool,
     /// Site icons by host (imported data: URLs or icon URLs seen while browsing).
@@ -259,6 +283,18 @@ struct App {
     favicons_dirty: bool,
     restart_needed: bool,
     quitting: bool,
+    tech_db: Option<std::sync::Arc<leirk::tech::Db>>,
+    tech_pending: bool,
+    cpu_prev: Option<(u64, Instant)>,
+    thumbs: HashMap<TabId, String>,
+    /// Side panel rect (logical px) and what it shows: "dev" or a panel id.
+    side: (f64, f64, f64, f64),
+    panel_open: Option<String>,
+    panel_views: HashMap<String, WebView>,
+    docked: HashMap<String, panels::Docked>,
+    remote_tabs: Vec<Value>,
+    sync_devices: Vec<Value>,
+    last_sync: u64,
 }
 
 impl App {
@@ -311,11 +347,12 @@ impl App {
                 let _ = v.set_visible(true);
                 let _ = v.set_memory_usage_level(MemoryUsageLevel::Normal);
             }
-            if !self.overlay {
+            if !self.overlay || self.awaiting_backdrop {
                 Self::raise(v.hwnd());
             }
         }
-        if self.overlay {
+        self.layout_panel();
+        if self.overlay && !self.awaiting_backdrop {
             Self::raise(self.ui.hwnd());
         }
         self.enforce_budget();
@@ -324,6 +361,10 @@ impl App {
     /// Hidden tabs drop to low-memory mode and get suspended (timers and JS stop) until shown again.
     fn hide(&mut self, id: TabId) {
         self.shown.remove(&id);
+        if !self.views.contains_key(&id) {
+            return;
+        }
+        self.capture_thumb(id);
         let Some(v) = self.views.get(&id) else { return };
         let _ = v.set_visible(false);
         if self.tabs.get(id).is_some_and(|t| t.audible) || !self.pref_on("suspend_bg") {
@@ -363,13 +404,17 @@ impl App {
         if tab.url.is_empty() {
             return false;
         }
-        let (url, private) = (tab.url.clone(), tab.private);
+        let (url, private, container) = (tab.url.clone(), tab.private, tab.container.clone().filter(|_| !tab.private));
         let (p1, p2, p3, p4) = (self.proxy.clone(), self.proxy.clone(), self.proxy.clone(), self.proxy.clone());
         let page_js = PAGE_JS
             .replace("__GPC__", if self.pref_on("gpc") { "true" } else { "false" })
             .replace("__LG__", if self.pref_on("gestures") { "true" } else { "false" })
             .replace("__RK__", if self.pref_on("rocker") { "true" } else { "false" });
-        let built = WebViewBuilder::new_with_web_context(&mut self.ctx)
+        let mut builder = WebViewBuilder::new_with_web_context(&mut self.ctx);
+        if let Some(name) = container {
+            builder = builder.with_profile_name(format!("leirk-{name}")); // cookies and storage isolated per container
+        }
+        let built = builder
             .with_additional_browser_args(&self.args)
             .with_url(&url)
             .with_incognito(private)
@@ -461,6 +506,15 @@ impl App {
                         None => Verdict::Allow,
                     }
                 };
+                if shared.dev("network") {
+                    let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+                    let mut logs = shared.netlog.borrow_mut();
+                    let log = logs.entry(id).or_default();
+                    if log.len() >= 400 {
+                        log.pop_front();
+                    }
+                    log.push_back(json!({"u": url, "m": pwstr(|p| req.Method(p)), "t": resource_kind(ctx), "b": verdict != Verdict::Allow, "s": 0, "z": null, "d": null, "ts": ts}));
+                }
                 match verdict {
                     Verdict::Allow => {
                         if shared.on("gpc") {
@@ -550,6 +604,7 @@ impl App {
         )?;
 
         self.hook_keys(&ctrl)?;
+        self.dev_hook(&core, id)?;
 
         let proxy = self.proxy.clone();
         core.add_SourceChanged(
@@ -731,7 +786,8 @@ impl App {
             .map(|t| {
                 json!({"id": t.id, "title": t.title, "url": t.url, "favicon": t.favicon, "stack": t.stack,
                        "loaded": t.loaded, "private": t.private, "pinned": t.pinned, "audible": t.audible,
-                       "loading": self.loading.contains(&t.id)})
+                       "loading": self.loading.contains(&t.id), "container": t.container,
+                       "errors": self.shared.errors.borrow().get(&t.id).map_or(0, |e| e.len())})
             })
             .collect();
         let top_sites = if self.active_blank() { self.history.top(8) } else { vec![] };
@@ -750,6 +806,8 @@ impl App {
             "maxLive": self.profile.max_live, "idle": self.profile.idle_minutes,
             "prefs": *self.shared.prefs.borrow(), "restart": self.restart_needed,
             "lists": leirk::shields::LISTS.iter().map(|l| l.id).collect::<Vec<_>>(),
+            "panelOpen": self.panel_open, "docked": self.docked.keys().collect::<Vec<_>>(),
+            "remoteTabs": self.remote_tabs, "syncDevices": self.sync_devices, "lastSync": self.last_sync, "device": synchost::device_name(),
         })
     }
 
@@ -875,8 +933,10 @@ impl App {
     }
 
     fn set_overlay(&mut self, open: bool) {
-        if open && !self.overlay && !self.active_blank() {
+        self.awaiting_backdrop = false;
+        if open && !self.overlay && !self.active_blank() && self.views.contains_key(&self.tabs.active) {
             self.capture_backdrop();
+            self.awaiting_backdrop = true; // the chrome sends "raise" once the snapshot is painted
         }
         self.overlay = open;
         self.layout();
@@ -964,7 +1024,9 @@ impl App {
     }
 
     fn quit(&mut self) {
+        self.undock_all();
         self.save();
+        self.sync_now();
         let flags = self.pref("clear_on_exit");
         let kinds: Vec<&str> = ["history", "cookies", "cache"].into_iter().filter(|k| flags[*k].as_bool().unwrap_or(false)).collect();
         if kinds.is_empty() || self.quitting {
@@ -979,12 +1041,26 @@ impl App {
         if c != "query" && c != "layout" {
             self.log(&format!("cmd {c} {}", if c == "pref" { v["k"].to_string() } else { v.to_string() }));
         }
+        if self.dev_command(c, v) || self.panel_command(c, v) || self.sync_command(c, v) {
+            return;
+        }
         let target = v.as_u64().unwrap_or(self.tabs.active);
         match c {
+            "openContainer" => {
+                let name = v["name"].as_str().unwrap_or("").to_string();
+                let url = v["url"].as_str().map(String::from).unwrap_or_else(|| self.tabs.get(self.tabs.active).map(|t| t.url.clone()).unwrap_or_default());
+                let after = (self.pref_str("new_tab_pos") == "right").then_some(self.tabs.active);
+                let id = self.tabs.open(&url, false, after);
+                if let Some(t) = self.tabs.get_mut(id) {
+                    t.container = Some(name).filter(|n| !n.is_empty());
+                }
+                self.activate(id);
+            }
             "layout" => {
                 let s = self.scale();
                 let f = |k: &str| v[k].as_f64().unwrap_or(0.0) * s;
                 self.content = (f("x"), f("y"), f("w"), f("h"));
+                self.side = (f("sx"), f("sy"), f("sw"), f("sh"));
                 self.layout();
                 return;
             }
@@ -1097,7 +1173,7 @@ impl App {
                 }
                 let (url, title) = (t.url.clone(), t.title.clone());
                 if !self.profile.bookmarks.iter().any(|b| b.url == url) {
-                    self.profile.bookmarks.push(Bookmark { title, url, folder: String::new(), ts: 0 });
+                    self.profile.bookmarks.push(Bookmark { title, url, folder: String::new(), ts: now() as i64 });
                     self.bookmarks_dirty = true;
                 }
                 self.push();
@@ -1112,17 +1188,21 @@ impl App {
                     if let Some(f) = v["folder"].as_str() {
                         b.folder = f.trim_matches('/').to_string();
                     }
+                    b.ts = now() as i64;
                 }
                 self.bookmarks_dirty = true;
             }
             "bmRemove" => {
                 let url = v.as_str().unwrap_or("");
                 self.profile.bookmarks.retain(|b| b.url != url);
+                self.profile.deleted.push((url.to_string(), now() as i64));
                 self.bookmarks_dirty = true;
             }
             "bmFolderRemove" => {
                 let f = v.as_str().unwrap_or("").to_string();
-                self.profile.bookmarks.retain(|b| b.folder != f && !b.folder.starts_with(&format!("{f}/")));
+                let gone: Vec<String> = self.profile.bookmarks.iter().filter(|b| b.folder == f || b.folder.starts_with(&format!("{f}/"))).map(|b| b.url.clone()).collect();
+                self.profile.bookmarks.retain(|b| !gone.contains(&b.url));
+                self.profile.deleted.extend(gone.into_iter().map(|u| (u, now() as i64)));
                 self.bookmarks_dirty = true;
             }
             "toggleBar" => {
@@ -1130,6 +1210,13 @@ impl App {
                 self.set_pref("bookmarks_bar", json!(next));
             }
             "overlay" => return self.set_overlay(v.as_bool().unwrap_or(false)),
+            "raise" => {
+                if self.overlay && self.awaiting_backdrop {
+                    self.awaiting_backdrop = false;
+                    self.layout();
+                }
+                return;
+            }
             "query" => return self.query(v["q"].as_str().unwrap_or(""), v["seq"].as_u64().unwrap_or(0)),
             "drag" => return drop(self.window.drag_window()),
             "resize" => return drop(self.window.drag_resize_window(ResizeDirection::North)),
@@ -1233,6 +1320,9 @@ impl App {
         // user data is written at once: an import or a new bookmark must survive a crash
         if matches!(c, "import" | "bookmark" | "bmEdit" | "bmRemove" | "bmFolderRemove" | "pref" | "setting" | "engineAdd" | "engineRemove" | "resetPrefs") {
             self.save();
+            if c != "pref" || v["k"] == "sync_folder" {
+                self.sync_now();
+            }
         }
         self.push();
     }
@@ -1253,6 +1343,7 @@ impl App {
             self.profile.prefs = json!({});
         }
         self.profile.prefs[k] = v;
+        self.profile.prefs_ts = now() as i64;
         *self.shared.prefs.borrow_mut() = merged_prefs(&self.profile.prefs);
         self.apply_pref(k);
         self.dirty = true;
@@ -1277,6 +1368,30 @@ impl App {
                 return;
             }
             Ev::Navigate(id, url) => return self.navigate_tab(id, url),
+            Ev::Dev(kind, data) => {
+                if kind == "dockerAct" {
+                    return self.command("devDocker", &Value::Null);
+                }
+                return self.js(&format!("L.dev({},{})", json!(kind), data));
+            }
+            Ev::TechDb(db) => {
+                self.tech_db = Some(db);
+                if std::mem::take(&mut self.tech_pending) {
+                    self.tech_detect();
+                }
+                return;
+            }
+            Ev::Thumb(id, data) => {
+                if self.thumbs.len() >= 40 && !self.thumbs.contains_key(&id) {
+                    let views = &self.views;
+                    if let Some(k) = self.thumbs.keys().find(|k| !views.contains_key(k)).or(self.thumbs.keys().next()).copied() {
+                        self.thumbs.remove(&k);
+                    }
+                }
+                self.thumbs.insert(id, format!("data:image/jpeg;base64,{data}"));
+                return;
+            }
+            Ev::Repaint => {}
             Ev::Quit => std::process::exit(0),
             Ev::Cosmetic(id, classes, ids) => {
                 let (Some(v), Some(t)) = (self.views.get(&id), self.tabs.get(id)) else { return };
@@ -1367,6 +1482,13 @@ impl App {
 fn main() {
     let dir = store::data_dir();
     let _ = std::fs::create_dir_all(&dir);
+    let log = dir.join("leirk.log");
+    std::panic::set_hook(Box::new(move |info| {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+            let _ = writeln!(f, "{} PANIC {info}", now());
+        }
+    }));
     let mut profile: Profile = store::load_json(&dir.join("profile.json"));
     let prefs = merged_prefs(&profile.prefs);
     if !profile.prefs.is_object() {
@@ -1390,6 +1512,7 @@ fn main() {
         .with_undecorated_shadow(true)
         .with_inner_size(LogicalSize::new(1280.0, 820.0))
         .with_min_inner_size(LogicalSize::new(520.0, 360.0))
+        .with_window_icon(app_icon())
         .build(&event_loop)
         .expect("window");
 
@@ -1397,7 +1520,11 @@ fn main() {
     let p = proxy.clone();
     let ui = WebViewBuilder::new_with_web_context(&mut ctx)
         .with_additional_browser_args(&args)
-        .with_html(include_str!("../ui/index.html"))
+        .with_html(
+            include_str!("../ui/index.html")
+                .replace("<!--EXTRA-->", concat!("<script>", include_str!("../ui/extra.js"), "</script>"))
+                .replace("__LOGO__", &format!("data:image/png;base64,{}", b64(include_bytes!("../assets/icon-128.png")))),
+        )
         .with_ipc_handler(move |req| {
             let _ = p.send_event(Ev::Ui(req.into_body()));
         })
@@ -1450,6 +1577,9 @@ fn main() {
             doc_scripts: RefCell::new(HashMap::new()),
             upgraded: RefCell::new(HashMap::new()),
             http_only: RefCell::new(HashSet::new()),
+            netlog: RefCell::new(HashMap::new()),
+            errors: RefCell::new(HashMap::new()),
+            doc_headers: RefCell::new(HashMap::new()),
         }),
         shields_gen: 0,
         lists_loaded: 0,
@@ -1459,12 +1589,24 @@ fn main() {
         loading: HashSet::new(),
         content: (0.0, 120.0, 1280.0, 700.0),
         overlay: false,
+        awaiting_backdrop: false,
         dirty: false,
         bookmarks_dirty: true,
         favicons: store::load_json(&dir.join("favicons.json")),
         favicons_dirty: true,
         restart_needed: false,
         quitting: false,
+        tech_db: None,
+        tech_pending: false,
+        cpu_prev: None,
+        thumbs: HashMap::new(),
+        side: (0.0, 0.0, 0.0, 0.0),
+        panel_open: None,
+        panel_views: HashMap::new(),
+        docked: HashMap::new(),
+        remote_tabs: vec![],
+        sync_devices: vec![],
+        last_sync: 0,
     };
     unsafe {
         let _ = app.hook_keys(&app.ui.controller());
@@ -1481,6 +1623,7 @@ fn main() {
     app.tabs.activate(app.tabs.active, now());
     let _ = app.ui.focus();
     app.reload_shields();
+    app.sync_now();
 
     event_loop.run(move |event, _, flow| match event {
         Event::NewEvents(StartCause::Init) => {
@@ -1495,6 +1638,9 @@ fn main() {
             app.enforce_budget();
             if app.dirty {
                 app.save();
+            }
+            if now().saturating_sub(app.last_sync) >= 120 {
+                app.sync_now();
             }
             app.push();
         }
