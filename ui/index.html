@@ -83,7 +83,7 @@ html[data-max] #grip { display: none; }
 
 /* Tab row */
 #tabbar { display: flex; align-items: flex-end; height: 38px; padding: 0 0 0 8px; }
-#tabs { display: flex; flex: 0 1 auto; min-width: 0; gap: 2px; align-items: flex-end; height: 100%; padding-top: 6px; }
+#tabs { display: flex; flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; gap: 2px; align-items: flex-end; height: 100%; padding-top: 6px; }
 .tab {
   position: relative; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 10px;
   flex: 0 1 auto; width: 232px; min-width: 40px; border-radius: var(--r) var(--r) 0 0; color: var(--ink-2);
@@ -117,13 +117,17 @@ html[data-max] #grip { display: none; }
 .tab:hover .x, .tab.active .x { opacity: 1; }
 .x:hover { background: var(--press); color: var(--ink); }
 .tab.priv .fav { background: oklch(0.45 0.12 285); color: white; }
-.tab.narrow .x { display: none; } .tab.narrow.active .x { display: grid; } .tab.narrow.active .fav { display: none; }
+.tab.narrow { padding: 0; justify-content: center; gap: 0; }
+.tab.narrow .title, .tab.narrow .badge, .tab.narrow .snd, .tab.narrow .x { display: none; }
+.tab.narrow.active .x { display: grid; } .tab.narrow.active .fav { display: none; }
 
 .icon { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; color: var(--ink-2); flex: none; transition: background-color .12s; }
 .icon:hover { background: var(--hover); color: var(--ink); }
 .icon:active { background: var(--press); }
 .icon[disabled] { opacity: .35; pointer-events: none; }
+#tabs::-webkit-scrollbar { display: none; }
 #newtab { margin: 0 4px 3px; }
+#win, #newtab { flex: none; }
 #drag { flex: 1 0 48px; align-self: stretch; }
 #win { display: flex; align-self: flex-start; }
 #win button { width: 46px; height: 34px; display: grid; place-items: center; color: var(--ink-2); }
@@ -149,6 +153,7 @@ html[data-max] #grip { display: none; }
 #field.focus { background: var(--raised); box-shadow: 0 0 0 2px var(--ember), var(--shadow); }
 #field .lead { color: var(--ink-3); }
 #addr { flex: 1; min-width: 0; height: 100%; border: 0; background: none; font: 14px var(--font); color: var(--ink); user-select: text; }
+#addr:focus-visible { outline: none; }
 #addr::placeholder { color: var(--ink-3); }
 #star.on { color: var(--ember); }
 #star.on svg { fill: currentColor; }
@@ -345,6 +350,7 @@ html[data-blank] #ntp { display: block; }
 
 <script>
 "use strict";
+addEventListener("error", e => send("log", `${e.message} @${e.lineno}:${e.colno}`));
 const $ = s => document.querySelector(s);
 const send = (c, v) => window.ipc.postMessage(JSON.stringify({ c, v }));
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -412,6 +418,7 @@ function renderTabs() {
   const box = $("#tabs");
   box.innerHTML = out.join("");
   box.querySelectorAll(".tab").forEach(el => el.classList.toggle("narrow", el.offsetWidth < 90));
+  box.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   const sb = $("#stackbar"), inStack = activeTab && activeTab.stack != null;
   sb.classList.toggle("on", !!inStack);
   sb.innerHTML = inStack ? S.tabs.filter(m => m.stack === activeTab.stack).map(m => tabHtml(m, 0, m.id === S.active, true)).join("") : "";
@@ -515,7 +522,7 @@ function renderToolbar() {
   cnt.textContent = sh.count > 99 ? "99+" : sh.count;
   b.title = live ? (sh.on ? `Shields : ${sh.count} bloqués` : "Shields désactivés pour ce site") : "Shields";
   const tb = $("#tilebtn");
-  tb.classList.toggle("on", sel.size >= 2 || S.tiled.length >= 2);
+  tb.classList.toggle("on", sel.size >= 2 || S.tiled.includes(S.active));
   tb.querySelector("span").textContent = sel.size >= 2 ? `Mosaïque (${Math.min(sel.size, 4)})` : "Quitter la mosaïque";
   $("#wmax").innerHTML = `<svg viewBox="0 0 12 12"><use href="#i-${S.maximized ? "restore" : "max"}"/></svg>`;
   $("#wmax").setAttribute("aria-label", S.maximized ? "Restaurer" : "Agrandir");
@@ -539,6 +546,7 @@ $("#tabbar").addEventListener("mousedown", e => {
 const addr = $("#addr");
 function openSheet(palette) {
   editing = true; paletteMode = palette;
+  $("#lead").innerHTML = `<use href="#i-search"/>`;
   $("#field").classList.add("focus");
   show("sheet");
   addr.focus();
@@ -573,13 +581,14 @@ const COMMANDS = [
   ["mask", "Nouvel onglet privé", () => send("private"), "Ctrl+Maj+N"],
   ["reload", "Rouvrir l'onglet fermé", () => send("reopen"), "Ctrl+Maj+T"],
   ["x", "Fermer l'onglet", () => send("close"), "Ctrl+W"],
-  ["star", "Ajouter ou retirer des signets", () => send("bookmark"), "Ctrl+D"],
-  ["shield", "Activer ou désactiver Shields sur ce site", () => send("shields")],
-  ["tile", "Mosaïque : onglets sélectionnés", () => { send("tile", [...sel].slice(0, 4)); sel.clear(); }, "Ctrl+clic"],
-  ["tile", "Quitter la mosaïque", () => send("untile")],
+  ["star", "Ajouter ou retirer des signets", () => send("bookmark"), "Ctrl+D", () => !!S.url],
+  ["shield", "Activer ou désactiver Shields sur ce site", () => send("shields"), "", () => !!S.shields.site],
+  ["tile", "Mosaïque : onglets sélectionnés", () => { send("tile", [...sel].slice(0, 4)); sel.clear(); }, "Ctrl+clic", () => sel.size >= 2],
+  ["tile", "Mosaïque avec l'onglet suivant", () => { const i = S.tabs.findIndex(t => t.id === S.active); send("tile", [S.active, S.tabs[i + 1].id]); }, "", () => !S.tiled.includes(S.active) && S.tabs.findIndex(t => t.id === S.active) < S.tabs.length - 1],
+  ["tile", "Quitter la mosaïque", () => send("untile"), "", () => S.tiled.includes(S.active)],
   ["moon", "Décharger les autres onglets", () => send("unloadOthers")],
   ["pin", "Épingler ou détacher l'onglet", () => send("pin")],
-  ["stack", "Retirer l'onglet de sa pile", () => send("unstack")],
+  ["stack", "Retirer l'onglet de sa pile", () => send("unstack"), "", () => S.tabs.find(t => t.id === S.active)?.stack != null],
   ["import", "Importer depuis un autre navigateur", () => openSettings()],
   ["gear", "Réglages", () => openSettings()],
   ["code", "Outils de développement", () => send("devtools"), "F12"],
@@ -609,7 +618,7 @@ function build() {
       .map(h => ({ fav: h, t: h.title || h.url, u: h.url, k: "", act: nt => send(nt ? "open" : "nav", h.url) }));
     if (hist.length) groups.push(["Historique", hist]);
   }
-  const cmds = COMMANDS.filter(c => !q || match(q, c[1])).slice(0, q ? 5 : 99).map(c => ({ icon: c[0], t: c[1], u: "", k: c[3] || "", act: c[2] }));
+  const cmds = COMMANDS.filter(c => (!c[4] || c[4]()) && (!q || match(q, c[1]))).slice(0, q ? 5 : 99).map(c => ({ icon: c[0], t: c[1], u: "", k: c[3] || "", act: c[2] }));
   // F2 is Vivaldi's Quick Commands: actions lead; Ctrl+L stays an address bar.
   if (cmds.length) paletteMode ? groups.unshift(["Commandes", cmds]) : groups.push(["Commandes", cmds]);
   items = groups.flatMap(g => g[1]);

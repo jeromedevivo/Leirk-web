@@ -241,7 +241,7 @@ impl App {
             return false;
         }
         let (url, private) = (tab.url.clone(), tab.private);
-        let (p1, p2, p3) = (self.proxy.clone(), self.proxy.clone(), self.proxy.clone());
+        let (p1, p2, p3, p4) = (self.proxy.clone(), self.proxy.clone(), self.proxy.clone(), self.proxy.clone());
         let built = WebViewBuilder::new_with_web_context(&mut self.ctx)
             .with_url(&url)
             .with_incognito(private)
@@ -252,6 +252,19 @@ impl App {
             })
             .with_on_page_load_handler(move |e, u| {
                 let _ = p2.send_event(Ev::Loaded(id, matches!(e, PageLoadEvent::Finished), u));
+            })
+            // WebView2 does not report bare function keys as accelerators, so pages forward F2/F6 themselves.
+            // Pages can post anything here; only these two names are honoured.
+            .with_initialization_script(
+                "addEventListener('keydown',e=>{if((e.key==='F2'||e.key==='F6')&&!e.ctrlKey&&!e.altKey&&!e.shiftKey){e.preventDefault();window.ipc.postMessage(e.key)}},true)",
+            )
+            .with_ipc_handler(move |req| {
+                let key = match req.body().as_str() {
+                    "F2" => "palette",
+                    "F6" => "focus",
+                    _ => return,
+                };
+                let _ = p4.send_event(Ev::Key(key));
             })
             .with_new_window_req_handler(move |u, _| {
                 let _ = p3.send_event(Ev::NewTab(u));
@@ -486,6 +499,7 @@ impl App {
         let id = self.tabs.open(url, private, after);
         self.activate(id);
         if url.is_empty() {
+            self.push(); // the field must see the blank tab before it takes focus
             self.command("focus", &Value::Null);
         }
     }
@@ -562,7 +576,18 @@ impl App {
         self.js(&format!("L.results({seq},{})", json!({"bookmarks": marks, "history": hist})));
     }
 
+    /// Appends to leirk.log: UI script errors and the commands that preceded them.
+    fn log(&self, line: &str) {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(self.dir.join("leirk.log")) {
+            let _ = writeln!(f, "{} {line}", now());
+        }
+    }
+
     fn command(&mut self, c: &str, v: &Value) {
+        if c != "query" && c != "layout" {
+            self.log(&format!("cmd {c} {v}"));
+        }
         let target = v.as_u64().unwrap_or(self.tabs.active);
         match c {
             "layout" => {
@@ -717,6 +742,7 @@ impl App {
                 let id = self.tabs.list[i].id;
                 self.activate(id);
             }
+            "log" => return self.log(&format!("ui {}", v.as_str().unwrap_or(""))),
             "focus" | "palette" => {
                 let _ = self.ui.focus();
                 return self.js(if c == "focus" { "L.focus()" } else { "L.palette()" });
