@@ -57,7 +57,30 @@ pub const RESOURCES_URL: &str = "https://raw.githubusercontent.com/brave/adblock
 
 /// Every list URL the prefs enable, in order, without duplicates.
 pub fn list_urls(prefs: &Value) -> Vec<String> {
-    todo!()
+    let level = prefs["shields_level"].as_str().unwrap_or("standard");
+    let mut out: Vec<String> = vec![];
+    if level == "off" {
+        return out;
+    }
+    let mut push = |u: String| {
+        if !out.contains(&u) {
+            out.push(u);
+        }
+    };
+    for l in LISTS.iter().filter(|l| prefs["lists"][l.id].as_bool().unwrap_or(false)) {
+        for u in l.urls {
+            push(u.replace("{ubo}", UBO).replace("{brave}", BRAVE));
+        }
+    }
+    if level == "aggressive" {
+        AGGRESSIVE.iter().for_each(|u| push(u.to_string()));
+    }
+    for line in prefs["custom_lists"].as_str().unwrap_or("").lines().map(str::trim) {
+        if line.starts_with("http://") || line.starts_with("https://") {
+            push(line.to_string());
+        }
+    }
+    out
 }
 
 #[derive(Debug, PartialEq)]
@@ -88,12 +111,24 @@ impl Shields {
 
     /// Loads Brave's `resources.json` (scriptlets and redirect targets). Invalid JSON is ignored.
     pub fn with_resources(mut self, json: &str) -> Self {
-        todo!()
+        if let Ok(r) = serde_json::from_str::<Vec<adblock::resources::Resource>>(json) {
+            self.engine.use_resources(r);
+        }
+        self
     }
 
     /// `kind` uses adblock request types: "script", "image", "stylesheet", "xmlhttprequest", "sub_frame", "other"...
     pub fn check(&self, url: &str, page_url: &str, kind: &str) -> Verdict {
-        todo!()
+        if self.disabled_sites.contains(host(page_url)) {
+            return Verdict::Allow;
+        }
+        let Ok(req) = adblock::request::Request::new(url, page_url, kind, "GET") else { return Verdict::Allow };
+        let r = self.engine.check_network_request(&req);
+        match r.redirect {
+            Some(data) if r.should_block() => Verdict::Redirect(data),
+            _ if r.should_block() => Verdict::Block,
+            _ => Verdict::Allow,
+        }
     }
 
     pub fn should_block(&self, url: &str, page_url: &str, kind: &str) -> bool {
@@ -110,12 +145,37 @@ impl Shields {
 
     /// Script to run at document creation on `url`: its scriptlets plus a style sheet hiding site-specific ads.
     pub fn document_script(&self, url: &str) -> Option<String> {
-        todo!()
+        if self.disabled_sites.contains(host(url)) {
+            return None;
+        }
+        let res = self.engine.url_cosmetic_resources(url);
+        let sels: Vec<&str> = res.hide_selectors.iter().map(String::as_str).collect();
+        if sels.is_empty() && res.injected_script.is_empty() {
+            return None;
+        }
+        let style = if sels.is_empty() {
+            String::new()
+        } else {
+            let css = serde_json::to_string(&format!("{}{{display:none!important}}", sels.join(","))).unwrap_or_default();
+            // the document element may not exist yet at document creation
+            format!(
+                "var c={css};var a=function(){{var s=document.createElement('style');s.textContent=c;(document.head||document.documentElement).appendChild(s)}};\
+                 if(document.documentElement)a();else new MutationObserver(function(m,o){{if(document.documentElement){{o.disconnect();a()}}}}).observe(document,{{childList:true}});"
+            )
+        };
+        Some(format!("(function(){{if(window.top!==window)return;try{{{}}}catch(e){{}}{style}}})();", res.injected_script))
     }
 
     /// Generic cosmetic filtering: selectors matching the classes and ids the page actually uses.
     pub fn generic_selectors(&self, url: &str, classes: &[String], ids: &[String]) -> Vec<String> {
-        todo!()
+        if self.disabled_sites.contains(host(url)) {
+            return vec![];
+        }
+        let res = self.engine.url_cosmetic_resources(url);
+        if res.generichide {
+            return vec![];
+        }
+        self.engine.hidden_class_id_selectors(classes, ids, &res.exceptions)
     }
 }
 

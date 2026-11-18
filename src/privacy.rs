@@ -10,12 +10,45 @@ const TRACKING: &[&str] = &[
 
 /// URL without tracking parameters (`utm_*` and the list above), or `None` when nothing changed.
 pub fn strip_tracking(url: &str) -> Option<String> {
-    todo!()
+    let (rest, frag) = match url.split_once('#') {
+        Some((r, f)) => (r, Some(f)),
+        None => (url, None),
+    };
+    let (base, query) = rest.split_once('?')?;
+    let params: Vec<&str> = query.split('&').filter(|p| !p.is_empty()).collect();
+    let kept: Vec<&str> = params
+        .iter()
+        .copied()
+        .filter(|p| {
+            let name = p.split('=').next().unwrap_or("");
+            !name.starts_with("utm_") && !TRACKING.contains(&name)
+        })
+        .collect();
+    if kept.len() == params.len() {
+        return None;
+    }
+    let mut out = base.to_string();
+    if !kept.is_empty() {
+        out += "?";
+        out += &kept.join("&");
+    }
+    if let Some(f) = frag {
+        out += "#";
+        out += f;
+    }
+    Some(out)
 }
 
 /// `https://` version of a plain-http URL, except for local hosts that rarely have certificates.
 pub fn https_upgrade(url: &str) -> Option<String> {
-    todo!()
+    let rest = url.strip_prefix("http://")?;
+    let host = crate::shields::host(url);
+    let local = host == "localhost"
+        || !host.contains('.')
+        || host.starts_with('[')
+        || host.parse::<std::net::Ipv4Addr>().is_ok()
+        || [".local", ".lan", ".internal", ".home", ".test", ".localhost"].iter().any(|s| host.ends_with(s));
+    (!local).then(|| format!("https://{rest}"))
 }
 
 #[cfg(test)]

@@ -49,7 +49,12 @@ pub fn parse_chromium_bookmarks(json: &str) -> Vec<Bookmark> {
     }
     let mut out = vec![];
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
-        todo!()
+        for (key, root) in v["roots"].as_object().into_iter().flatten() {
+            let base = if key == "bookmark_bar" { String::new() } else { root["name"].as_str().unwrap_or(key).to_string() };
+            for c in root["children"].as_array().into_iter().flatten() {
+                walk(c, &base, &mut out);
+            }
+        }
     }
     out
 }

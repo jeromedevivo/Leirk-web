@@ -48,7 +48,20 @@ pub const DEFAULTS: &str = include_str!("../ui/defaults.json");
 
 /// Defaults overlaid with the saved prefs (nested objects merge key by key; unknown saved keys survive).
 pub fn merged_prefs(saved: &serde_json::Value) -> serde_json::Value {
-    todo!()
+    fn merge(a: &mut serde_json::Value, b: &serde_json::Value) {
+        let (Some(ao), Some(bo)) = (a.as_object_mut(), b.as_object()) else { return };
+        for (k, v) in bo {
+            match ao.get_mut(k) {
+                Some(x) if x.is_object() && v.is_object() => merge(x, v),
+                _ => {
+                    ao.insert(k.clone(), v.clone());
+                }
+            }
+        }
+    }
+    let mut d: serde_json::Value = serde_json::from_str(DEFAULTS).expect("ui/defaults.json is valid JSON");
+    merge(&mut d, saved);
+    d
 }
 
 pub fn data_dir() -> PathBuf {

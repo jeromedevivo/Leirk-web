@@ -87,17 +87,9 @@ impl Tabs {
 
     /// Closes a tab, activating per `focus`. Keeps at least one tab open.
     pub fn close_with(&mut self, id: TabId, focus: CloseFocus) {
-        todo!()
-    }
-
-    /// Most recently used tab other than the active one (Ctrl+Tab in recent order).
-    pub fn recent_other(&self) -> Option<TabId> {
-        todo!()
-    }
-
-    /// Closes a tab. Keeps at least one tab open and picks the right neighbour as new active.
-    pub fn close(&mut self, id: TabId) {
         let Some(i) = self.index(id) else { return };
+        let was_active = self.active == id;
+        let recent = self.list.iter().filter(|t| t.id != id).max_by_key(|t| t.last_active).map(|t| t.id);
         self.list.remove(i);
         self.unstack_dangling();
         self.tiled.retain(|&t| t != id);
@@ -105,11 +97,26 @@ impl Tabs {
             self.tiled.clear();
         }
         if self.list.is_empty() {
-            let n = self.open("", false, None);
-            self.active = n;
-        } else if self.active == id {
-            self.active = self.list[i.min(self.list.len() - 1)].id;
+            self.active = self.open("", false, None);
+        } else if was_active {
+            let right = self.list[i.min(self.list.len() - 1)].id;
+            self.active = match focus {
+                CloseFocus::Recent => recent.unwrap_or(right),
+                CloseFocus::Right => right,
+                CloseFocus::Left if i > 0 => self.list[i - 1].id,
+                CloseFocus::Left => right,
+            };
         }
+    }
+
+    /// Most recently used tab other than the active one (Ctrl+Tab in recent order).
+    pub fn recent_other(&self) -> Option<TabId> {
+        self.list.iter().filter(|t| t.id != self.active).max_by_key(|t| t.last_active).map(|t| t.id)
+    }
+
+    /// Closes a tab. Keeps at least one tab open and picks the right neighbour as new active.
+    pub fn close(&mut self, id: TabId) {
+        self.close_with(id, CloseFocus::Right);
     }
 
     /// Tabs whose webview is on screen: the tiled set when the active tab is tiled, else the active tab.
@@ -292,7 +299,8 @@ mod tests {
         let site = |t: &Tab| t.audible || t.url.contains("://1.");
         let mut got = t.unload_candidates(3, 10_000, 1010, &site);
         got.sort();
-        assert_eq!(got, vec![ids[2], ids[3]]);
+        // protected tabs still count toward the budget, so one more tab goes
+        assert_eq!(got, vec![ids[2], ids[3], ids[4]]);
     }
 
     #[test]
