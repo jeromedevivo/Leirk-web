@@ -14,6 +14,9 @@ Source plan: none; journeys derived during this run from the user's answers.
 | RED | `cargo test --lib` | 1 passed, 23 failed (all on `todo!()`) | 2276ab6 |
 | GREEN | `cargo test --lib` | 24 passed (one test expectation fixed: `!` encodes to `%21`) | 8085091 |
 | App | `cargo test` | 24 lib + 2 bin passed | 5a47588 |
+| RED v0.2 | `cargo test --lib` | 19 passed, 15 failed (todo!) | 9951aab |
+| GREEN v0.2 | `cargo test --lib` | 34 passed | 4b68996 |
+| App v0.2 | `cargo test` | 34 lib + 5 bin passed; adblock-tester.com 100/100 in the release build | (this commit) |
 
 ## Guarantees
 | # | Guarantee | Test |
@@ -26,6 +29,13 @@ Source plan: none; journeys derived during this run from the user's answers.
 | 6 | History ranks by visits, matches all words, escapes LIKE wildcards, keeps known titles, merges imports | `store::*` |
 | 7 | Chromium bookmarks flatten with folder paths and drop `javascript:`; Google-templated engines are rejected | `import::*` |
 | 8 | Shortcut map and base64 encoder | `main::tests` |
+| 9 | Prefs merge over shipped defaults (nested, unknown keys kept) | `store::prefs_merge_over_defaults` |
+| 10 | Tracking params stripped, other params kept; only public http hosts upgraded | `privacy::*` |
+| 11 | Calculator precedence, French comma, rejects plain numbers/URLs/division by zero | `calc::*` |
+| 12 | Brave list catalog follows prefs (levels, toggles, custom lists); redirects become data URLs; scriptlets + site CSS at document start; generic cosmetics honour site exceptions | `shields::*` |
+| 13 | Close focus modes (recent/right/left) and MRU; exempt sites protected but counted in the budget | `tabs::*` |
+| 14 | Bookmarks-bar items import at the bar root, other roots keep their name | `import::*` |
+| 15 | Redirect data-URL decoding, gesture map, list cache names | `main::tests` |
 
 ## Gaps
 Window, WebView2 hooks and UI were verified by running the release build with scripted clicks and keys and checking screenshots (new tab page, navigation, palette, 12-tab restore), not by automated E2E. Coverage tooling is not installed (`cargo llvm-cov` absent), so no coverage percentage was measured.

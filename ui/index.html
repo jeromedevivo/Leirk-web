@@ -5,7 +5,7 @@
 <title>Leirk</title>
 <style>
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --ground: oklch(0.94 0.006 250);
   --raised: oklch(0.985 0.003 250);
@@ -13,38 +13,45 @@
   --field-hover: oklch(0.88 0.008 250);
   --ink: oklch(0.22 0.012 255);
   --ink-2: oklch(0.43 0.012 255);
-  --ink-3: oklch(0.5 0.012 255);
+  --ink-3: oklch(0.48 0.012 255);
   --line: oklch(0.86 0.008 250);
   --hover: oklch(0.22 0.02 255 / 0.07);
   --press: oklch(0.22 0.02 255 / 0.12);
-  --ember: oklch(0.57 0.19 36);
-  --ember-soft: oklch(0.57 0.19 36 / 0.14);
-  --sel: oklch(0.57 0.19 36 / 0.22);
-  --on-ember: oklch(0.99 0 0);
   --veil: oklch(0.3 0.01 255 / 0.32);
   --shadow: 0 1px 2px oklch(0.2 0.02 255 / 0.08), 0 12px 32px -8px oklch(0.2 0.02 255 / 0.22);
+  --a-light: oklch(0.57 0.19 36); --a-dark: oklch(0.72 0.17 42);
+  --ember: var(--a-light);
+  --on-ember: oklch(0.99 0 0);
+  --ember-soft: color-mix(in oklch, var(--ember) 15%, transparent);
+  --sel: color-mix(in oklch, var(--ember) 24%, transparent);
   --r: 8px;
+  --tab-h: 32px; --bar-h: 38px; --tool-h: 44px; --field-h: 32px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ground: oklch(0.205 0.008 255);
-    --raised: oklch(0.275 0.009 255);
-    --field: oklch(0.255 0.009 255);
-    --field-hover: oklch(0.29 0.01 255);
-    --ink: oklch(0.95 0.005 255);
-    --ink-2: oklch(0.78 0.008 255);
-    --ink-3: oklch(0.68 0.008 255);
-    --line: oklch(0.32 0.01 255);
-    --hover: oklch(0.98 0.01 255 / 0.07);
-    --press: oklch(0.98 0.01 255 / 0.12);
-    --ember: oklch(0.72 0.17 42);
-    --ember-soft: oklch(0.72 0.17 42 / 0.16);
-    --on-ember: oklch(0.17 0.02 40);
-    --sel: oklch(0.72 0.17 42 / 0.28);
-    --veil: oklch(0.08 0.01 255 / 0.5);
-    --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 16px 40px -8px oklch(0 0 0 / 0.55);
-  }
+html[data-accent=blue] { --a-light: oklch(0.53 0.17 255); --a-dark: oklch(0.72 0.14 255); }
+html[data-accent=violet] { --a-light: oklch(0.53 0.2 295); --a-dark: oklch(0.74 0.15 295); }
+html[data-accent=green] { --a-light: oklch(0.52 0.13 155); --a-dark: oklch(0.75 0.15 155); }
+html[data-accent=pink] { --a-light: oklch(0.56 0.2 355); --a-dark: oklch(0.75 0.15 355); }
+html[data-accent=graphite] { --a-light: oklch(0.42 0.02 255); --a-dark: oklch(0.82 0.01 255); }
+/* Dark: forced, or following the system unless light is forced. */
+html[data-theme=dark], html[data-private] { color-scheme: dark; }
+@media (prefers-color-scheme: dark) { html:not([data-theme=light]) { color-scheme: dark; } }
+html[data-theme=dark] { --dark: 1; }
+html[data-theme=dark], html[data-dark] {
+  --ground: oklch(0.205 0.008 255);
+  --raised: oklch(0.275 0.009 255);
+  --field: oklch(0.255 0.009 255);
+  --field-hover: oklch(0.29 0.01 255);
+  --ink: oklch(0.95 0.005 255);
+  --ink-2: oklch(0.78 0.008 255);
+  --ink-3: oklch(0.68 0.008 255);
+  --line: oklch(0.32 0.01 255);
+  --hover: oklch(0.98 0.01 255 / 0.07);
+  --press: oklch(0.98 0.01 255 / 0.12);
+  --veil: oklch(0.08 0.01 255 / 0.5);
+  --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 16px 40px -8px oklch(0 0 0 / 0.55);
+  --ember: var(--a-dark);
+  --on-ember: oklch(0.17 0.02 40);
 }
 /* Private tabs turn the whole chrome to deep indigo, like Safari's private mode. */
 html[data-private] {
@@ -54,12 +61,15 @@ html[data-private] {
   --field-hover: oklch(0.33 0.07 285);
   --ink: oklch(0.96 0.01 285);
   --ink-2: oklch(0.82 0.03 285);
-  --ink-3: oklch(0.7 0.04 285);
+  --ink-3: oklch(0.72 0.04 285);
   --line: oklch(0.36 0.06 285);
   --hover: oklch(0.98 0.02 285 / 0.08);
   --press: oklch(0.98 0.02 285 / 0.14);
-  color-scheme: dark;
+  --ember: var(--a-dark);
+  --on-ember: oklch(0.17 0.02 40);
 }
+html[data-density=compact] { --tab-h: 28px; --bar-h: 32px; --tool-h: 38px; --field-h: 28px; }
+html[data-noanim] *, html[data-noanim] *::before, html[data-noanim] *::after { animation: none !important; transition: none !important; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
@@ -77,33 +87,36 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 kbd { font: 11px var(--font); color: var(--ink-3); }
 
-#chrome { position: relative; z-index: 3; background: var(--ground); }
+#app { display: flex; flex-direction: column; height: 100%; }
+#chrome { position: relative; z-index: 3; background: var(--ground); flex: none; }
 #grip { position: absolute; inset: 0 0 auto; height: 4px; z-index: 5; cursor: n-resize; }
 html[data-max] #grip { display: none; }
 
 /* Tab row */
-#tabbar { display: flex; align-items: flex-end; height: 38px; padding: 0 0 0 8px; }
-#tabs { display: flex; flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; gap: 2px; align-items: flex-end; height: 100%; padding-top: 6px; }
+#tabbar { display: flex; align-items: flex-end; height: var(--bar-h); padding: 0 0 0 8px; }
+#tabs { display: flex; flex: 0 1 auto; min-width: 0; gap: 2px; align-items: flex-end; height: 100%; padding-top: 6px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+#tabs::-webkit-scrollbar { display: none; }
 .tab {
-  position: relative; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 10px;
+  position: relative; display: flex; align-items: center; gap: 8px; height: var(--tab-h); padding: 0 6px 0 10px;
   flex: 0 1 auto; width: 232px; min-width: 40px; border-radius: var(--r) var(--r) 0 0; color: var(--ink-2);
   transition: background-color .15s var(--ease);
 }
 .tab:hover { background: var(--hover); }
 .tab.active { background: var(--raised); color: var(--ink); }
-.tab.pinned { flex: 0 0 40px; padding: 0; justify-content: center; }
+.tab.pinned { flex: 0 0 40px; width: 40px; padding: 0; justify-content: center; }
 .tab.pinned .title, .tab.pinned .x { display: none; }
 .tab.sel { box-shadow: inset 0 0 0 1.5px var(--ember); }
 .tab.drop-in { background: var(--ember-soft); }
 .tab.drop-l::before, .tab.drop-r::after { content: ""; position: absolute; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--ember); }
 .tab.drop-l::before { left: -2px; } .tab.drop-r::after { right: -2px; }
-.tab + .tab:not(.active):not(:hover)::before { content: ""; position: absolute; left: -1px; top: 9px; bottom: 9px; width: 1px; background: var(--line); }
-.tab.active + .tab::before, .tab:hover + .tab::before { display: none; }
+#tabs .tab + .tab:not(.active):not(:hover)::before { content: ""; position: absolute; left: -1px; top: 9px; bottom: 9px; width: 1px; background: var(--line); }
+#tabs .tab.active + .tab::before, #tabs .tab:hover + .tab::before { display: none; }
 .fav { width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center; font-size: 10px; font-weight: 600; background: var(--field); color: var(--ink-2); overflow: hidden; }
 .fav img { width: 16px; height: 16px; }
 .fav svg { width: 11px; height: 11px; }
 .tab.unloaded .fav { filter: grayscale(1); opacity: .5; }
 .tab.unloaded .title { opacity: .58; }
+html[data-nodim] .tab.unloaded .fav, html[data-nodim] .tab.unloaded .title { filter: none; opacity: 1; }
 .tab.loading .fav { background: none; border: 1.5px solid var(--line); border-top-color: var(--ember); border-radius: 50%; animation: spin .8s linear infinite; }
 .tab.loading .fav > * { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -112,9 +125,9 @@ html[data-max] #grip { display: none; }
 .tab.stack { box-shadow: inset 0 2px 0 -0.5px var(--ink-3); }
 .tab.stack.active { box-shadow: inset 0 2px 0 -0.5px var(--ember); }
 .tab .snd { color: var(--ink-2); }
-.x { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; opacity: 0; color: var(--ink-2); }
+.x { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; opacity: 0; color: var(--ink-2); flex: none; }
 .x svg { width: 12px; height: 12px; }
-.tab:hover .x, .tab.active .x { opacity: 1; }
+.tab:hover .x, .tab.active .x, html[data-closeall] .tab .x { opacity: 1; }
 .x:hover { background: var(--press); color: var(--ink); }
 .tab.priv .fav { background: oklch(0.45 0.12 285); color: white; }
 .tab.narrow { padding: 0; justify-content: center; gap: 0; }
@@ -125,12 +138,11 @@ html[data-max] #grip { display: none; }
 .icon:hover { background: var(--hover); color: var(--ink); }
 .icon:active { background: var(--press); }
 .icon[disabled] { opacity: .35; pointer-events: none; }
-#tabs::-webkit-scrollbar { display: none; }
 #newtab { margin: 0 4px 3px; }
 #win, #newtab { flex: none; }
 #drag { flex: 1 0 48px; align-self: stretch; }
 #win { display: flex; align-self: flex-start; }
-#win button { width: 46px; height: 34px; display: grid; place-items: center; color: var(--ink-2); }
+#win button { width: 46px; height: calc(var(--bar-h) - 4px); display: grid; place-items: center; color: var(--ink-2); }
 #win button:hover { background: var(--hover); color: var(--ink); }
 #win #wclose:hover { background: #c42b1c; color: #fff; }
 #win svg { width: 11px; height: 11px; stroke-width: 1.1; }
@@ -140,13 +152,12 @@ html[data-max] #grip { display: none; }
 #stackbar.on { display: flex; }
 #stackbar .tab { height: 26px; border-radius: 6px; max-width: 200px; }
 #stackbar .tab.active { background: var(--field); }
-#stackbar .tab::before { display: none; }
 
 /* Toolbar */
-#toolbar { display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; background: var(--raised); border-bottom: 1px solid var(--line); }
+#toolbar { display: flex; align-items: center; gap: 2px; height: var(--tool-h); padding: 0 8px; background: var(--raised); }
 #fieldwrap { position: relative; flex: 1; max-width: 860px; margin: 0 auto; }
 #field {
-  display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px 0 10px; border-radius: var(--r);
+  display: flex; align-items: center; gap: 8px; height: var(--field-h); padding: 0 4px 0 10px; border-radius: var(--r);
   background: var(--field); transition: background-color .15s, box-shadow .2s var(--ease);
 }
 #field:hover { background: var(--field-hover); }
@@ -164,13 +175,34 @@ html[data-max] #grip { display: none; }
 #tilebtn { display: none; height: 28px; padding: 0 10px; gap: 6px; align-items: center; border-radius: 7px; background: var(--ember-soft); color: var(--ink); font-weight: 600; }
 #tilebtn.on { display: flex; }
 
-/* Everything below the chrome while the chrome is expanded */
-#below { position: fixed; inset: 0; z-index: 1; display: none; }
-html[data-full] #below { display: block; }
+/* Bookmarks bar */
+#bmbar { display: flex; align-items: center; gap: 2px; height: 30px; padding: 0 8px 2px; background: var(--raised); border-top: 1px solid transparent; overflow: hidden; }
+.bm { display: flex; align-items: center; gap: 6px; height: 24px; max-width: 180px; padding: 0 8px; border-radius: 6px; color: var(--ink); flex: none; }
+.bm:hover { background: var(--hover); }
+.bm span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bm .fav { width: 14px; height: 14px; font-size: 9px; }
+.bm svg { color: var(--ink-2); }
+#bmmore { margin-left: auto; }
+.chrome-line { height: 1px; background: var(--line); }
+
+/* Main area: optional vertical tabs, then the page rect */
+#main { flex: 1; display: flex; min-height: 0; }
+#vtabs { display: none; flex-direction: column; width: 248px; flex: none; padding: 6px 6px 8px; background: var(--ground); border-right: 1px solid var(--line); }
+html[data-vtabs] #vtabs { display: flex; }
+html[data-vtabs] #tabs, html[data-vtabs] #newtab, html[data-vtabs] #stackbar { display: none; }
+#vlist { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+#vlist .tab { width: auto; flex: none; border-radius: var(--r); height: 32px; }
+#vlist .tab.active { background: var(--raised); box-shadow: 0 1px 2px oklch(0 0 0 / 0.08); }
+#vlist .tab.indent { margin-left: 18px; }
+#vlist .tab.pinned { width: auto; padding: 0 6px 0 10px; justify-content: flex-start; }
+#vlist .tab.pinned .title { display: block; }
+#vnew { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: var(--r); color: var(--ink-2); margin-top: 4px; }
+#vnew:hover { background: var(--hover); color: var(--ink); }
+#content { flex: 1; position: relative; min-width: 0; background: var(--raised); }
 #veil { position: absolute; inset: 0; background: var(--ground) center / cover no-repeat; opacity: 0; transition: opacity .18s var(--ease); }
 #veil.img { filter: blur(20px) saturate(1.1); transform: scale(1.04); }
 html[data-overlay]:not([data-blank]) #veil { opacity: 1; }
-#veil-tint { position: absolute; inset: 0; background: var(--veil); opacity: 0; transition: opacity .18s; }
+#veil-tint { position: absolute; inset: 0; background: var(--veil); opacity: 0; transition: opacity .18s; pointer-events: none; }
 html[data-overlay] #veil-tint { opacity: 1; }
 
 .popover {
@@ -189,41 +221,88 @@ html[data-overlay] #veil-tint { opacity: 1; }
 .row svg, .row .fav { color: var(--ink-2); }
 .row.hi, .menu .row:hover, .menu .row:focus-visible { background: var(--ember-soft); outline: none; }
 .row.hi .k { color: var(--ink-2); }
+.row.calc .t { font-size: 15px; font-weight: 600; }
 .hint { display: flex; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 12px; }
 
-.menu { padding: 6px; min-width: 270px; }
+.menu { padding: 6px; min-width: 270px; max-height: 70vh; overflow-y: auto; }
 .menu .row { height: 32px; }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
 
 /* Shields panel */
-#shieldsPanel { width: 300px; padding: 18px; }
+#shieldsPanel { width: 310px; padding: 18px; }
 #shieldsPanel h2 { margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 #shieldsPanel .big { font-size: 34px; font-weight: 600; letter-spacing: -0.02em; margin: 16px 0 0; }
 #shieldsPanel p { margin: 2px 0 0; color: var(--ink-2); }
-.switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding: 12px; border-radius: 10px; background: var(--field); }
+.switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 12px; border-radius: 10px; background: var(--field); }
+.switch + .switch { margin-top: 6px; }
 .toggle { width: 38px; height: 22px; border-radius: 11px; background: var(--line); position: relative; transition: background-color .2s var(--ease); flex: none; }
 .toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 2px oklch(0 0 0 / 0.25); transition: transform .2s var(--ease); }
 .toggle[aria-checked=true] { background: var(--ember); }
 .toggle[aria-checked=true]::after { transform: translateX(16px); }
 .foot { margin-top: 12px; font-size: 12px; color: var(--ink-3); }
+.link { color: var(--ember); font-weight: 600; }
+.link:hover { text-decoration: underline; text-underline-offset: 3px; }
 
-/* Settings */
-#settings { width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 110px); overflow-y: auto; padding: 8px 20px 20px; }
-#settings h2 { font-size: 13px; font-weight: 600; margin: 18px 0 8px; color: var(--ink-2); }
-.set { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line); }
-.set small { display: block; color: var(--ink-3); font-size: 12px; margin-top: 2px; }
-select, .btn { font: inherit; color: var(--ink); background: var(--field); border: 0; border-radius: 7px; height: 30px; padding: 0 10px; }
-select:hover, .btn:hover { background: var(--field-hover); }
+/* Bookmark editor */
+#bmPop { width: 320px; padding: 16px; }
+#bmPop h2 { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
+.lbl { display: block; font-size: 12px; color: var(--ink-2); margin: 10px 0 4px; }
+input.in, textarea.in, select {
+  width: 100%; font: inherit; color: var(--ink); background: var(--field); border: 1px solid transparent; border-radius: 7px; height: 32px; padding: 0 10px; user-select: text;
+}
+textarea.in { height: auto; padding: 8px 10px; resize: vertical; font: 12px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+input.in:focus, textarea.in:focus, select:focus { border-color: var(--ember); }
+select { width: auto; min-width: 180px; }
+.actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.btn { font: inherit; color: var(--ink); background: var(--field); border: 0; border-radius: 7px; height: 30px; padding: 0 12px; white-space: nowrap; }
+.btn:hover { background: var(--field-hover); }
 .btn.primary { background: var(--ember); color: var(--on-ember); font-weight: 600; }
 .btn.primary:hover { filter: brightness(1.06); }
-input[type=range] { accent-color: var(--ember); width: 140px; }
-.out { min-width: 2ch; text-align: right; color: var(--ink-2); }
-#importList { display: grid; gap: 4px; margin: 4px 0 10px; }
+.btn.danger { color: oklch(0.48 0.19 25); }
+html[data-dark] .btn.danger, html[data-private] .btn.danger { color: oklch(0.75 0.15 25); }
+
+/* Settings */
+#settings { width: min(920px, calc(100vw - 32px)); height: min(680px, calc(100vh - 80px)); padding: 0; overflow: hidden; }
+#settings.on { display: flex; }
+#setnav { width: 220px; flex: none; padding: 14px 8px; border-right: 1px solid var(--line); overflow-y: auto; background: var(--ground); }
+#setsearch { margin: 0 4px 10px; width: calc(100% - 8px); }
+#setnav button { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 10px; border-radius: 7px; color: var(--ink-2); text-align: left; }
+#setnav button:hover { background: var(--hover); color: var(--ink); }
+#setnav button.on { background: var(--ember-soft); color: var(--ink); font-weight: 600; }
+#setbody { flex: 1; overflow-y: auto; padding: 8px 28px 28px; }
+#setbody h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin: 18px 0 6px; }
+#setbody h3 { font-size: 12.5px; font-weight: 600; margin: 22px 0 4px; color: var(--ink-2); }
+.set { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.set.col { flex-direction: column; align-items: stretch; gap: 8px; }
+.set small { display: block; color: var(--ink-3); font-size: 12px; margin-top: 2px; max-width: 60ch; }
+.set .ctl { display: flex; align-items: center; gap: 8px; flex: none; }
+input[type=range] { accent-color: var(--ember); width: 160px; }
+.out { min-width: 4ch; text-align: right; color: var(--ink-2); }
+.swatches { display: flex; gap: 8px; }
+.sw { width: 24px; height: 24px; border-radius: 50%; box-shadow: inset 0 0 0 1px oklch(0 0 0 / 0.15); }
+.sw.on { box-shadow: 0 0 0 2px var(--raised), 0 0 0 4px var(--ink); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 4px 0 10px; border-radius: 13px; background: var(--field); }
+.chip button { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; }
+.chip button:hover { background: var(--press); }
+.chip svg { width: 11px; height: 11px; }
+.inline { display: flex; gap: 8px; }
+.inline .in { flex: 1; }
+.engine-row { display: grid; grid-template-columns: 1fr 70px 2fr 28px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.engine-row .u { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.engine-row kbd { background: var(--field); border-radius: 5px; padding: 1px 6px; color: var(--ink-2); }
+.checks { display: flex; flex-wrap: wrap; gap: 14px; }
+.checks label { display: flex; align-items: center; gap: 6px; }
+input[type=checkbox] { accent-color: var(--ember); width: 15px; height: 15px; }
+.keys { display: grid; grid-template-columns: 1fr auto; gap: 4px 20px; }
+.keys kbd { background: var(--field); border-radius: 5px; padding: 2px 7px; color: var(--ink); font-size: 12px; }
+.banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 10px 14px; border-radius: 10px; background: var(--ember-soft); }
+#importList { display: grid; gap: 4px; margin: 8px 0 10px; }
 #importList .row { height: 34px; background: var(--field); }
 #importList .row:hover { background: var(--field-hover); }
 
 /* New tab page */
-#ntp { position: absolute; inset: 0; display: none; overflow-y: auto; }
+#ntp { position: absolute; inset: 0; display: none; overflow-y: auto; background: var(--ground); }
 html[data-blank] #ntp { display: block; }
 #ntp .wrap { max-width: 720px; margin: 0 auto; padding: 9vh 24px 48px; }
 #ntp .stat { display: flex; gap: 48px; justify-content: center; text-align: center; margin-bottom: 56px; }
@@ -252,6 +331,7 @@ html[data-blank] #ntp { display: block; }
   <symbol id="i-fwd" viewBox="0 0 16 16"><path d="m6 3 5 5-5 5"/></symbol>
   <symbol id="i-reload" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M13 2.5v3h-3"/></symbol>
   <symbol id="i-stop" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></symbol>
+  <symbol id="i-home" viewBox="0 0 16 16"><path d="M2.5 7.5 8 3l5.5 4.5M4 6.5v6.5h3v-3.5h2V13h3V6.5"/></symbol>
   <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
   <symbol id="i-x" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></symbol>
   <symbol id="i-menu" viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></symbol>
@@ -272,54 +352,75 @@ html[data-blank] #ntp { display: block; }
   <symbol id="i-code" viewBox="0 0 16 16"><path d="m5.5 4.5-3.5 3.5 3.5 3.5M10.5 4.5 14 8l-3.5 3.5"/></symbol>
   <symbol id="i-pin" viewBox="0 0 16 16"><path d="M6 2.5h4M7 2.5v4L4.5 9h7L9 6.5v-4M8 9v4.5"/></symbol>
   <symbol id="i-stack" viewBox="0 0 16 16"><rect x="2.5" y="6" width="11" height="7.5" rx="1.5"/><path d="M4 4h8M5.5 2h5"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="m4 4 4 4-4 4M8.5 4l4 4-4 4"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 16 16"><path d="M10.5 2.5 13.5 5.5 6 13H3v-3z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 16 16"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></symbol>
+  <symbol id="i-newtab" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" rx="1.5"/><path d="M8 6v4M6 8h4"/></symbol>
+  <symbol id="i-download" viewBox="0 0 16 16"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13h10"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 16 16"><path d="M8 2a6 6 0 1 0 0 12c1 0 1.3-.8.8-1.5-.6-.8 0-1.8 1-1.8H11a3 3 0 0 0 3-3C14 4.5 11.3 2 8 2z"/><circle cx="5" cy="7" r=".8"/><circle cx="7.5" cy="4.8" r=".8"/><circle cx="10.5" cy="5.6" r=".8"/></symbol>
+  <symbol id="i-tabs" viewBox="0 0 16 16"><rect x="2" y="4" width="12" height="9.5" rx="1.5"/><path d="M2 7h12M6 4v3"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"/></symbol>
+  <symbol id="i-hand" viewBox="0 0 16 16"><path d="M5.5 8V3.5a1 1 0 0 1 2 0V7M7.5 7V2.5a1 1 0 0 1 2 0V7M9.5 7V3.5a1 1 0 0 1 2 0V9c0 2.8-1.7 4.5-4 4.5-1.8 0-2.7-.9-3.6-2.4L2.6 8.8a1 1 0 0 1 1.7-1L5.5 9"/></symbol>
+  <symbol id="i-key" viewBox="0 0 16 16"><circle cx="5.5" cy="10.5" r="3"/><path d="m7.6 8.4 5.4-5.4M11 5l1.5 1.5M9.5 6.5 11 8"/></symbol>
   <symbol id="i-min" viewBox="0 0 12 12"><path d="M1 6h10"/></symbol>
   <symbol id="i-max" viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" rx="1"/></symbol>
   <symbol id="i-restore" viewBox="0 0 12 12"><rect x="1.5" y="3.5" width="7" height="7" rx="1"/><path d="M3.5 3.5V2.5a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-1"/></symbol>
   <symbol id="i-close" viewBox="0 0 12 12"><path d="m1.5 1.5 9 9M10.5 1.5l-9 9"/></symbol>
 </svg>
 
-<div id="chrome">
-  <div id="grip"></div>
-  <div id="tabbar">
-    <div id="tabs" role="tablist" aria-label="Onglets"></div>
-    <button class="icon" id="newtab" title="Nouvel onglet (Ctrl+T)" aria-label="Nouvel onglet"><svg><use href="#i-plus"/></svg></button>
-    <div id="drag"></div>
-    <div id="win">
-      <button id="wmin" aria-label="Réduire"><svg viewBox="0 0 12 12"><use href="#i-min"/></svg></button>
-      <button id="wmax" aria-label="Agrandir"><svg viewBox="0 0 12 12"><use href="#i-max"/></svg></button>
-      <button id="wclose" aria-label="Fermer"><svg viewBox="0 0 12 12"><use href="#i-close"/></svg></button>
-    </div>
-  </div>
-  <div id="stackbar" role="tablist" aria-label="Onglets de la pile"></div>
-  <div id="toolbar">
-    <button class="icon" id="back" title="Précédente (Alt+←)" aria-label="Page précédente"><svg><use href="#i-back"/></svg></button>
-    <button class="icon" id="fwd" title="Suivante (Alt+→)" aria-label="Page suivante"><svg><use href="#i-fwd"/></svg></button>
-    <button class="icon" id="reload" title="Actualiser (F5)" aria-label="Actualiser"><svg><use href="#i-reload"/></svg></button>
-    <button id="tilebtn"><svg><use href="#i-tile"/></svg><span></span></button>
-    <div id="fieldwrap">
-      <div id="field">
-        <svg class="lead" id="lead"><use href="#i-search"/></svg>
-        <input id="addr" spellcheck="false" autocomplete="off" placeholder="Rechercher ou saisir une adresse" aria-label="Adresse et recherche" role="combobox" aria-expanded="false" aria-controls="results">
-        <button class="icon" id="star" title="Ajouter aux signets (Ctrl+D)" aria-label="Signet"><svg><use href="#i-star"/></svg></button>
+<div id="app">
+  <header id="chrome">
+    <div id="grip"></div>
+    <div id="tabbar">
+      <div id="tabs" role="tablist" aria-label="Onglets"></div>
+      <button class="icon" id="newtab" title="Nouvel onglet (Ctrl+T)" aria-label="Nouvel onglet"><svg><use href="#i-plus"/></svg></button>
+      <div id="drag"></div>
+      <div id="win">
+        <button id="wmin" aria-label="Réduire"><svg viewBox="0 0 12 12"><use href="#i-min"/></svg></button>
+        <button id="wmax" aria-label="Agrandir"><svg viewBox="0 0 12 12"><use href="#i-max"/></svg></button>
+        <button id="wclose" aria-label="Fermer"><svg viewBox="0 0 12 12"><use href="#i-close"/></svg></button>
       </div>
     </div>
-    <button class="icon" id="shield" title="Shields" aria-label="Shields"><svg><use href="#i-shield"/></svg><span class="count" hidden></span></button>
-    <button class="icon" id="menubtn" title="Menu" aria-label="Menu"><svg><use href="#i-menu"/></svg></button>
-  </div>
-</div>
-
-<div id="below">
-  <div id="veil"></div><div id="veil-tint"></div>
-  <div id="ntp"><div class="wrap">
-    <div class="stat">
-      <div><b class="ember" id="ntpBlocked">0</b><span>pubs et traqueurs bloqués</span></div>
-      <div><b id="ntpTabs">1</b><span>onglets ouverts</span></div>
-      <div><b id="ntpLive">0</b><span>en mémoire</span></div>
+    <div id="stackbar" role="tablist" aria-label="Onglets de la pile"></div>
+    <div id="toolbar">
+      <button class="icon" id="back" title="Précédente (Alt+←)" aria-label="Page précédente"><svg><use href="#i-back"/></svg></button>
+      <button class="icon" id="fwd" title="Suivante (Alt+→)" aria-label="Page suivante"><svg><use href="#i-fwd"/></svg></button>
+      <button class="icon" id="reload" title="Actualiser (F5)" aria-label="Actualiser"><svg><use href="#i-reload"/></svg></button>
+      <button class="icon" id="home" title="Accueil (Alt+Origine)" aria-label="Accueil" hidden><svg><use href="#i-home"/></svg></button>
+      <button id="tilebtn"><svg><use href="#i-tile"/></svg><span></span></button>
+      <div id="fieldwrap">
+        <div id="field">
+          <svg class="lead" id="lead"><use href="#i-search"/></svg>
+          <input id="addr" spellcheck="false" autocomplete="off" placeholder="Rechercher ou saisir une adresse" aria-label="Adresse et recherche" role="combobox" aria-expanded="false" aria-controls="results">
+          <button class="icon" id="star" title="Ajouter aux favoris (Ctrl+D)" aria-label="Favori"><svg><use href="#i-star"/></svg></button>
+        </div>
+      </div>
+      <button class="icon" id="shield" title="Shields" aria-label="Shields"><svg><use href="#i-shield"/></svg><span class="count" hidden></span></button>
+      <button class="icon" id="menubtn" title="Menu" aria-label="Menu"><svg><use href="#i-menu"/></svg></button>
     </div>
-    <h3 id="sitesTitle">Sites fréquents</h3>
-    <div id="sites"></div>
-    <div class="note">F2 ou Ctrl+K : onglets, historique, signets et commandes au même endroit.</div>
-  </div></div>
+    <nav id="bmbar" aria-label="Barre de favoris" hidden></nav>
+    <div class="chrome-line"></div>
+  </header>
+  <div id="main">
+    <aside id="vtabs" aria-label="Onglets">
+      <div id="vlist" role="tablist"></div>
+      <button id="vnew"><svg><use href="#i-plus"/></svg>Nouvel onglet</button>
+    </aside>
+    <section id="content">
+      <div id="veil"></div><div id="veil-tint"></div>
+      <div id="ntp"><div class="wrap">
+        <div class="stat">
+          <div><b class="ember" id="ntpBlocked">0</b><span>pubs et traqueurs bloqués</span></div>
+          <div><b id="ntpTabs">1</b><span>onglets ouverts</span></div>
+          <div><b id="ntpLive">0</b><span>en mémoire</span></div>
+        </div>
+        <h3 id="sitesTitle">Sites fréquents</h3>
+        <div id="sites"></div>
+        <div class="note">F2 ou Ctrl+K : onglets, favoris, historique, calculs et commandes au même endroit.</div>
+      </div></div>
+    </section>
+  </div>
 </div>
 
 <div class="popover" id="sheet" role="listbox" aria-label="Suggestions"><div id="results"></div>
@@ -332,19 +433,19 @@ html[data-blank] #ntp { display: block; }
   <div class="big" id="shCount">0</div>
   <p>éléments bloqués sur cette page</p>
   <div class="switch"><span id="shLabel">Shields activés pour ce site</span><button class="toggle" id="shToggle" role="switch" aria-checked="true" aria-label="Shields pour ce site"></button></div>
-  <div class="foot" id="shFoot"></div>
+  <div class="switch"><span>Bloquer les scripts sur ce site</span><button class="toggle" id="shScripts" role="switch" aria-checked="false" aria-label="Bloquer les scripts"></button></div>
+  <div class="foot"><span id="shFoot"></span> · <button class="link" id="shSettings">Réglages des Shields</button></div>
+</div>
+<div class="popover" id="bmPop" role="dialog" aria-label="Favori">
+  <h2 id="bmTitle">Favori ajouté</h2>
+  <label class="lbl" for="bmName">Nom</label><input class="in" id="bmName">
+  <label class="lbl" for="bmFolder">Dossier</label><select id="bmFolder" style="width:100%"></select>
+  <input class="in" id="bmNewFolder" placeholder="Nom du nouveau dossier" hidden style="margin-top:6px">
+  <div class="actions"><button class="btn danger" id="bmDel">Supprimer</button><button class="btn primary" id="bmDone">Terminé</button></div>
 </div>
 <div class="popover" id="settings" role="dialog" aria-label="Réglages">
-  <h2>Recherche</h2>
-  <div class="set"><div>Moteur par défaut<small>Tapez un mot-clé devant la recherche (« g chats », « !yt lofi ») pour changer de moteur ponctuellement.</small></div><select id="engine"></select></div>
-  <h2>Mémoire</h2>
-  <div class="set"><div>Onglets gardés en mémoire<small>Les autres sont déchargés et se rechargent quand vous y revenez.</small></div><div style="display:flex;gap:8px;align-items:center"><input type="range" id="maxLive" min="1" max="12"><span class="out" id="maxLiveOut"></span></div></div>
-  <div class="set"><div>Décharger un onglet inactif après</div><select id="idle"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 h</option><option value="0">Jamais</option></select></div>
-  <h2>Importer</h2>
-  <div id="importList"></div>
-  <button class="btn primary" id="importAll">Tout importer</button>
-  <h2>Confidentialité</h2>
-  <div class="set"><div>Historique de navigation</div><button class="btn" id="clearHist">Effacer l'historique</button></div>
+  <nav id="setnav"><input class="in" id="setsearch" placeholder="Rechercher un réglage" aria-label="Rechercher un réglage"><div id="setsections"></div></nav>
+  <div id="setbody"></div>
 </div>
 <div id="toast" role="status"></div>
 
@@ -358,9 +459,11 @@ const icon = n => `<svg><use href="#i-${n}"/></svg>`;
 const hostOf = u => { try { return new URL(u).host.replace(/^www\./, ""); } catch { return ""; } };
 const root = document.documentElement;
 
-let S = { tabs: [], active: 0, tiled: [], url: "", shields: {}, settings: { engines: [] } };
+let S = { tabs: [], active: 0, tiled: [], url: "", shields: {}, prefs: {}, engines: [], lists: [] };
+let BM = [];
 const sel = new Set();
-let paletteMode = false, openPop = null, seq = 0, items = [], hi = 0, editing = false, lastResults = { bookmarks: [], history: [] }, lastH = 0;
+let paletteMode = false, openPop = null, seq = 0, items = [], hi = 0, editing = false, lastResults = { bookmarks: [], history: [] }, lastRect = "";
+const P = k => S.prefs[k];
 
 function fav(t) {
   if (t.favicon) return `<span class="fav"><img src="${esc(t.favicon)}" alt="" onerror="this.remove()"></span>`;
@@ -369,43 +472,72 @@ function fav(t) {
   return `<span class="fav">${esc((h || t.title).charAt(0).toUpperCase())}</span>`;
 }
 const tabTitle = t => t.title || (t.url ? hostOf(t.url) : "Nouvel onglet");
-const chromeH = () => Math.round($("#chrome").getBoundingClientRect().height);
-function sendLayout() { const h = chromeH(); if (h !== lastH) { lastH = h; send("layout", h); } }
+function sendLayout() {
+  const r = $("#content").getBoundingClientRect();
+  const key = [r.left, r.top, r.width, r.height].map(Math.round).join();
+  if (key !== lastRect) { lastRect = key; send("layout", { x: r.left, y: r.top, w: r.width, h: r.height }); }
+}
 
 /* ---------- state pushed by Rust ---------- */
 window.L = {
   state(s) {
     S = s;
+    applyPrefs();
     root.toggleAttribute("data-private", !!s.private);
     root.toggleAttribute("data-max", !!s.maximized);
     root.toggleAttribute("data-blank", !s.url);
-    syncFull();
-    renderTabs(); renderToolbar(); renderNtp();
+    renderTabs(); renderToolbar(); renderBookmarksBar(); renderNtp();
     if (openPop === "shieldsPanel") renderShields();
-    if (openPop === "settings") renderSettings();
+    if (openPop === "settings") renderSettings(false);
+    syncOverlay();
   },
+  bookmarks(list) { BM = list; renderBookmarksBar(); if (openPop === "settings") renderSettings(false); },
   focus() { focusField(); },
   palette() { openSheet(true); },
   results(n, r) { if (n === seq) { lastResults = r; build(); } },
   backdrop(src) { if (openPop) { const v = $("#veil"); v.style.backgroundImage = `url(${src})`; v.classList.add("img"); } },
   imports(list) {
-    $("#importList").innerHTML = list.length
+    const box = $("#importList"); if (!box) return;
+    box.innerHTML = list.length
       ? list.map((s, i) => `<button class="row" data-i="${i}">${icon("import")}<span class="t">${esc(s.name)}</span><span class="k">Importer</span></button>`).join("")
       : `<div class="row"><span class="u">Aucun autre navigateur détecté.</span></div>`;
   },
-  imported(r) { toast(`Importé : ${r.bookmarks} signets, ${r.history} pages d'historique, ${r.engines} moteurs.`); },
+  imported(r) { toast(`Importé : ${r.bookmarks} favoris, ${r.history} pages d'historique, ${r.engines} moteurs.`); },
+  bookmarkAdded() { openBookmarkEditor(S.url, true); },
 };
 
-function syncFull() {
-  root.toggleAttribute("data-overlay", !!openPop);
-  root.toggleAttribute("data-full", !!openPop || !S.url);
-  $("#below").style.top = chromeH() + "px";
+const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+darkQuery.addEventListener("change", () => applyPrefs());
+function applyPrefs() {
+  const t = P("theme");
+  root.dataset.theme = t || "system";
+  root.toggleAttribute("data-dark", t === "dark" || (t !== "light" && darkQuery.matches));
+  root.dataset.accent = P("accent") || "ember";
+  root.dataset.density = P("density") || "standard";
+  root.toggleAttribute("data-vtabs", P("tabs_position") === "left");
+  root.toggleAttribute("data-noanim", P("animations") === false);
+  root.toggleAttribute("data-nodim", P("dim_unloaded") === false);
+  root.toggleAttribute("data-closeall", P("close_btn") === "always");
+  $("#home").hidden = !P("show_home");
 }
+function syncOverlay() { root.toggleAttribute("data-overlay", !!openPop); }
 
 /* ---------- tabs ---------- */
 function renderTabs() {
-  const seen = new Set(), out = [];
+  const vertical = P("tabs_position") === "left";
   const activeTab = S.tabs.find(t => t.id === S.active);
+  if (vertical) {
+    const seen = new Set();
+    $("#vlist").innerHTML = S.tabs.map(t => {
+      const indent = t.stack != null && seen.has(t.stack); if (t.stack != null) seen.add(t.stack);
+      return tabHtml(t, 0, t.id === S.active, true, indent);
+    }).join("");
+    $("#vlist .tab.active")?.scrollIntoView({ block: "nearest" });
+    $("#tabs").innerHTML = ""; $("#stackbar").classList.remove("on");
+    return sendLayout();
+  }
+  $("#vlist").innerHTML = "";
+  const seen = new Set(), out = [];
   for (const t of S.tabs) {
     if (t.stack != null) {
       if (seen.has(t.stack)) continue;
@@ -424,11 +556,11 @@ function renderTabs() {
   sb.innerHTML = inStack ? S.tabs.filter(m => m.stack === activeTab.stack).map(m => tabHtml(m, 0, m.id === S.active, true)).join("") : "";
   sendLayout();
 }
-function tabHtml(t, count, active, member) {
+function tabHtml(t, count, active, member, indent) {
   const c = ["tab", active && "active", !t.loaded && t.url && "unloaded", t.loading && "loading", t.pinned && !member && "pinned",
-    sel.has(t.id) && "sel", count && "stack", t.private && "priv"].filter(Boolean).join(" ");
-  const tip = esc(tabTitle(t) + (t.url ? "\n" + t.url : "") + (!t.loaded && t.url ? "\nDéchargé de la mémoire" : ""));
-  return `<div class="${c}" role="tab" aria-selected="${active}" data-id="${t.id}" title="${tip}">
+    sel.has(t.id) && "sel", count && "stack", t.private && "priv", indent && "indent"].filter(Boolean).join(" ");
+  const tip = P("tooltips") === false ? "" : `title="${esc(tabTitle(t) + (t.url ? "\n" + t.url : "") + (!t.loaded && t.url ? "\nDéchargé de la mémoire" : ""))}"`;
+  return `<div class="${c}" role="tab" aria-selected="${active}" data-id="${t.id}" ${tip}>
     ${t.private ? `<span class="fav">${icon("mask")}</span>` : fav(t)}
     <span class="title">${esc(tabTitle(t))}</span>
     ${t.audible ? `<span class="snd">${icon("sound")}</span>` : ""}
@@ -437,35 +569,37 @@ function tabHtml(t, count, active, member) {
 }
 const tabFromEvent = e => { const el = e.target.closest(".tab"); return el ? { el, id: +el.dataset.id } : null; };
 
-for (const bar of [$("#tabs"), $("#stackbar")]) {
+for (const bar of [$("#tabs"), $("#stackbar"), $("#vlist")]) {
   bar.addEventListener("mousedown", e => {
     const t = tabFromEvent(e);
     if (!t) return;
     if (e.button === 1) { e.preventDefault(); send("close", t.id); return; }
     if (e.button !== 0 || e.target.closest(".x")) return;
     if (e.ctrlKey) { sel.has(t.id) ? sel.delete(t.id) : sel.add(t.id); renderTabs(); renderToolbar(); return; }
-    startDrag(e, t);
+    if (e.detail === 2 && P("dbl_close")) { send("close", t.id); return; }
+    startDrag(e, t, bar.id === "vlist");
   });
   bar.addEventListener("click", e => { const x = e.target.closest("[data-close]"); if (x) send("close", +x.dataset.close); });
   bar.addEventListener("contextmenu", e => { const t = tabFromEvent(e); if (t) { e.preventDefault(); tabMenu(t.id, e.clientX, e.clientY); } });
 }
 $("#tabs").addEventListener("wheel", e => {
+  if (P("wheel_switch") === false) return;
   const i = S.tabs.findIndex(t => t.id === S.active);
   const n = S.tabs[Math.min(S.tabs.length - 1, Math.max(0, i + Math.sign(e.deltaY || e.deltaX)))];
   if (n && n.id !== S.active) send("activate", n.id);
 }, { passive: true });
 
 /* Drag a tab: drop on a tab's middle to stack it (Vivaldi), on its edges to reorder. */
-function startDrag(e, t) {
-  const x0 = e.clientX; let target = null, mode = null, moved = false;
+function startDrag(e, t, vertical) {
+  const x0 = e.clientX, y0 = e.clientY; let target = null, mode = null, moved = false;
   const clear = () => document.querySelectorAll(".drop-in,.drop-l,.drop-r").forEach(el => el.classList.remove("drop-in", "drop-l", "drop-r"));
   const move = ev => {
-    if (!moved && Math.abs(ev.clientX - x0) < 6) return;
+    if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
     moved = true; clear();
-    const over = document.elementFromPoint(ev.clientX, 20)?.closest("#tabs .tab");
+    const over = document.elementFromPoint(ev.clientX, vertical ? ev.clientY : 20)?.closest(vertical ? "#vlist .tab" : "#tabs .tab");
     target = over && +over.dataset.id !== t.id ? over : null;
     if (!target) return;
-    const r = target.getBoundingClientRect(), f = (ev.clientX - r.left) / r.width;
+    const r = target.getBoundingClientRect(), f = vertical ? (ev.clientY - r.top) / r.height : (ev.clientX - r.left) / r.width;
     mode = f < .3 ? "l" : f > .7 ? "r" : "in";
     target.classList.add("drop-" + mode);
   };
@@ -492,7 +626,7 @@ function tabMenu(id, x, y) {
     ids && ["tile", `Afficher ${Math.min(ids.length, 4)} onglets en mosaïque`, () => { send("tile", ids.slice(0, 4)); sel.clear(); }],
     stackIds && ["tile", "Afficher la pile en mosaïque", () => send("tile", stackIds.slice(0, 4))],
     !ids && !stackIds && next && ["tile", "Mosaïque avec l'onglet suivant", () => send("tile", [id, next.id])],
-    S.tiled.length > 0 && ["tile", "Quitter la mosaïque", () => send("untile")],
+    S.tiled.includes(id) && ["tile", "Quitter la mosaïque", () => send("untile")],
     "-",
     next && t.stack == null && ["stack", "Empiler avec l'onglet suivant", () => send("stack", { id: next.id, onto: id })],
     t.stack != null && ["stack", "Retirer de la pile", () => send("unstack", id)],
@@ -504,12 +638,16 @@ function tabMenu(id, x, y) {
 }
 
 /* ---------- toolbar ---------- */
+function displayUrl(u) {
+  if (!u || P("full_url")) return u || "";
+  return u.replace(/^https:\/\//, "").replace(/^www\./, "").replace(/\/$/, "");
+}
 function renderToolbar() {
   $("#back").disabled = !S.back; $("#fwd").disabled = !S.forward;
   $("#reload").innerHTML = icon(S.loading ? "stop" : "reload");
   $("#reload").title = S.loading ? "Arrêter" : "Actualiser (F5)";
   if (!editing) {
-    $("#addr").value = S.url || "";
+    $("#addr").value = displayUrl(S.url);
     $("#lead").innerHTML = `<use href="#i-${S.url.startsWith("https://") ? "lock" : S.url ? "globe" : "search"}"/>`;
   }
   $("#star").classList.toggle("on", !!S.bookmarked);
@@ -530,8 +668,10 @@ function renderToolbar() {
 $("#back").onclick = () => send("back");
 $("#fwd").onclick = () => send("forward");
 $("#reload").onclick = () => send(S.loading ? "stop" : "reload");
-$("#star").onclick = () => { toast(S.bookmarked ? "Signet supprimé" : "Ajouté aux signets"); send("bookmark"); };
+$("#home").onclick = () => send("home");
+$("#star").onclick = () => S.bookmarked ? openBookmarkEditor(S.url, false) : send("bookmark");
 $("#newtab").onclick = () => send("newtab");
+$("#vnew").onclick = () => send("newtab");
 $("#tilebtn").onclick = () => { if (sel.size >= 2) { send("tile", [...sel].slice(0, 4)); sel.clear(); } else send("untile"); };
 $("#wmin").onclick = () => send("min");
 $("#wmax").onclick = () => send("max");
@@ -542,6 +682,96 @@ $("#tabbar").addEventListener("mousedown", e => {
   send(e.detail === 2 ? "max" : "drag");
 });
 
+/* ---------- bookmarks bar ---------- */
+const topFolder = f => f.split("/")[0];
+function folders() { return [...new Set(BM.map(b => b.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr")); }
+function renderBookmarksBar() {
+  const mode = P("bookmarks_bar"), bar = $("#bmbar");
+  const show = mode === "always" || (mode === "ntp" && !S.url);
+  bar.hidden = !show;
+  if (show) {
+    const tops = []; const seenF = new Set();
+    for (const b of BM) {
+      if (!b.folder) tops.push(`<button class="bm" data-url="${esc(b.url)}" title="${esc(b.title + "\n" + b.url)}">${fav(b)}<span>${esc(b.title || hostOf(b.url))}</span></button>`);
+      else { const f = topFolder(b.folder); if (!seenF.has(f)) { seenF.add(f); tops.push(`<button class="bm" data-folder="${esc(f)}">${icon("folder")}<span>${esc(f)}</span></button>`); } }
+    }
+    bar.innerHTML = (tops.length ? tops.join("") : `<span class="bm" style="color:var(--ink-3);max-width:none">Ajoutez des favoris avec l'étoile ou Ctrl+D, ou importez-les depuis un autre navigateur.</span>`)
+      + `<button class="icon" id="bmmore" title="Autres favoris" hidden>${icon("chev")}</button>`;
+    // whatever does not fit goes behind the » button
+    const more = $("#bmmore"), limit = bar.getBoundingClientRect().right - 40;
+    let hidden = 0;
+    bar.querySelectorAll(".bm").forEach(el => { if (el.getBoundingClientRect().right > limit) { el.hidden = true; hidden++; } });
+    more.hidden = !hidden;
+  }
+  sendLayout();
+}
+function bmOpen(url, how) { send(how === "bg" ? "openBg" : how === "new" ? "open" : how === "private" ? "openPrivate" : "nav", url); }
+function folderEntries(path) {
+  const subs = new Set(), out = [];
+  for (const b of BM) {
+    if (b.folder === path) out.push(["", b.title || b.url, () => bmOpen(b.url), "", fav(b), { url: b.url }]);
+    else if (b.folder.startsWith(path + "/")) subs.add(b.folder.slice(path.length + 1).split("/")[0]);
+  }
+  const dirs = [...subs].sort().map(s => ["folder", s, () => setTimeout(() => showFolder(path + "/" + s, lastMenuPos.x, lastMenuPos.y)), "›"]);
+  const urls = BM.filter(b => b.folder === path || b.folder.startsWith(path + "/")).map(b => b.url);
+  return [...dirs, ...(dirs.length && out.length ? ["-"] : []), ...out, "-",
+    ["newtab", `Tout ouvrir (${urls.length})`, () => urls.forEach(u => send("openBg", u))]];
+}
+let lastMenuPos = { x: 0, y: 0 };
+function showFolder(path, x, y) { lastMenuPos = { x, y }; showMenu("#menu", folderEntries(path), x, y); }
+$("#bmbar").addEventListener("click", e => {
+  const b = e.target.closest(".bm,#bmmore"); if (!b) return;
+  const r = b.getBoundingClientRect();
+  if (b.dataset.url) return bmOpen(b.dataset.url, e.ctrlKey ? "new" : e.shiftKey ? "bg" : "");
+  if (b.dataset.folder) return showFolder(b.dataset.folder, r.left, r.bottom + 4);
+  if (b.id === "bmmore") {
+    const items = [...document.querySelectorAll("#bmbar .bm[hidden]")].map(el => el.dataset.url
+      ? ["", el.textContent, () => bmOpen(el.dataset.url), "", el.querySelector(".fav")?.outerHTML]
+      : ["folder", el.dataset.folder, () => setTimeout(() => showFolder(el.dataset.folder, r.left - 200, r.bottom + 4)), "›"]);
+    showMenu("#menu", items, r.right - 280, r.bottom + 4);
+  }
+});
+$("#bmbar").addEventListener("auxclick", e => { const b = e.target.closest(".bm"); if (e.button === 1 && b?.dataset.url) bmOpen(b.dataset.url, "bg"); });
+$("#bmbar").addEventListener("contextmenu", e => {
+  const b = e.target.closest(".bm"); if (!b) return; e.preventDefault();
+  if (b.dataset.url) {
+    const u = b.dataset.url;
+    showMenu("#ctx", [
+      ["globe", "Ouvrir", () => bmOpen(u)], ["newtab", "Ouvrir dans un nouvel onglet", () => bmOpen(u, "new")],
+      ["moon", "Ouvrir en arrière-plan", () => bmOpen(u, "bg")], ["mask", "Ouvrir en navigation privée", () => bmOpen(u, "private")], "-",
+      ["edit", "Modifier…", () => openBookmarkEditor(u, false, b)], ["trash", "Supprimer", () => send("bmRemove", u)],
+    ], e.clientX, e.clientY);
+  } else if (b.dataset.folder) {
+    const f = b.dataset.folder, urls = BM.filter(x => x.folder === f || x.folder.startsWith(f + "/")).map(x => x.url);
+    showMenu("#ctx", [["newtab", `Tout ouvrir (${urls.length})`, () => urls.forEach(u => send("openBg", u))], "-",
+      ["trash", "Supprimer le dossier", () => { if (confirm(`Supprimer « ${f} » et ses ${urls.length} favoris ?`)) send("bmFolderRemove", f); }]], e.clientX, e.clientY);
+  }
+});
+
+/* Bookmark editor (star) */
+let bmEditing = null;
+function openBookmarkEditor(url, added, anchor) {
+  const b = BM.find(x => x.url === url) || { title: tabTitle(S.tabs.find(t => t.id === S.active) || {}), url, folder: "" };
+  bmEditing = url;
+  $("#bmTitle").textContent = added ? "Favori ajouté" : "Modifier le favori";
+  $("#bmName").value = b.title;
+  $("#bmFolder").innerHTML = `<option value="">Barre de favoris</option>` + folders().map(f => `<option${f === b.folder ? " selected" : ""}>${esc(f)}</option>`).join("") + `<option value="__new">Nouveau dossier…</option>`;
+  $("#bmNewFolder").hidden = true; $("#bmNewFolder").value = "";
+  show("bmPop"); place("#bmPop", anchor || $("#star"));
+  $("#bmName").focus(); $("#bmName").select();
+}
+$("#bmFolder").onchange = e => { $("#bmNewFolder").hidden = e.target.value !== "__new"; if (e.target.value === "__new") $("#bmNewFolder").focus(); };
+function saveBookmark() {
+  if (!bmEditing) return;
+  let folder = $("#bmFolder").value;
+  if (folder === "__new") folder = $("#bmNewFolder").value.trim();
+  send("bmEdit", { url: bmEditing, title: $("#bmName").value.trim(), folder });
+  bmEditing = null; closeAll();
+}
+$("#bmDone").onclick = saveBookmark;
+$("#bmPop").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); saveBookmark(); } });
+$("#bmDel").onclick = () => { send("bmRemove", bmEditing); bmEditing = null; closeAll(); toast("Favori supprimé"); };
+
 /* ---------- the field: address bar and command palette in one ---------- */
 const addr = $("#addr");
 function openSheet(palette) {
@@ -550,7 +780,7 @@ function openSheet(palette) {
   $("#field").classList.add("focus");
   show("sheet");
   addr.focus();
-  if (palette) addr.value = ""; else addr.select();
+  if (palette) addr.value = ""; else { addr.value = S.url; addr.select(); }
   hi = 0;
   query();
 }
@@ -560,15 +790,16 @@ function focusField() {
   paletteMode = false;
   editing = true;
   $("#field").classList.add("focus");
+  addr.value = S.url;
   addr.focus(); addr.select();
 }
-addr.addEventListener("focus", () => { if (!editing) { editing = true; $("#field").classList.add("focus"); setTimeout(() => addr.select()); } });
+addr.addEventListener("focus", () => { if (!editing) { editing = true; addr.value = S.url; $("#field").classList.add("focus"); setTimeout(() => addr.select()); } });
 addr.addEventListener("blur", () => { if (openPop !== "sheet") { editing = false; $("#field").classList.remove("focus"); renderToolbar(); } });
 addr.addEventListener("input", () => { $("#lead").innerHTML = `<use href="#i-search"/>`; if (openPop !== "sheet") { show("sheet"); hi = 0; } query(); });
 addr.addEventListener("keydown", e => {
   if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); move(e.key === "ArrowDown" ? 1 : -1); }
-  else if (e.key === "Enter") { e.preventDefault(); if (openPop !== "sheet") query(); run(items[hi], e.shiftKey); }
-  else if (e.key === "Escape") { e.preventDefault(); if (openPop) closeAll(); else { addr.value = S.url; addr.blur(); } }
+  else if (e.key === "Enter") { e.preventDefault(); if (openPop !== "sheet") query(); run(items[hi], e.shiftKey || e.altKey); }
+  else if (e.key === "Escape") { e.preventDefault(); if (openPop) closeAll(); else { addr.value = displayUrl(S.url); addr.blur(); } }
 });
 function query() {
   seq++;
@@ -581,51 +812,67 @@ const COMMANDS = [
   ["mask", "Nouvel onglet privé", () => send("private"), "Ctrl+Maj+N"],
   ["reload", "Rouvrir l'onglet fermé", () => send("reopen"), "Ctrl+Maj+T"],
   ["x", "Fermer l'onglet", () => send("close"), "Ctrl+W"],
-  ["star", "Ajouter ou retirer des signets", () => send("bookmark"), "Ctrl+D", () => !!S.url],
+  ["star", "Ajouter aux favoris", () => send("bookmark"), "Ctrl+D", () => !!S.url && !S.bookmarked],
+  ["star", "Afficher ou masquer la barre de favoris", () => send("toggleBar"), "Ctrl+Maj+B"],
   ["shield", "Activer ou désactiver Shields sur ce site", () => send("shields"), "", () => !!S.shields.site],
+  ["code", "Bloquer ou autoriser les scripts sur ce site", () => send("noscript"), "", () => !!S.shields.site],
   ["tile", "Mosaïque : onglets sélectionnés", () => { send("tile", [...sel].slice(0, 4)); sel.clear(); }, "Ctrl+clic", () => sel.size >= 2],
   ["tile", "Mosaïque avec l'onglet suivant", () => { const i = S.tabs.findIndex(t => t.id === S.active); send("tile", [S.active, S.tabs[i + 1].id]); }, "", () => !S.tiled.includes(S.active) && S.tabs.findIndex(t => t.id === S.active) < S.tabs.length - 1],
   ["tile", "Quitter la mosaïque", () => send("untile"), "", () => S.tiled.includes(S.active)],
   ["moon", "Décharger les autres onglets", () => send("unloadOthers")],
   ["pin", "Épingler ou détacher l'onglet", () => send("pin")],
   ["stack", "Retirer l'onglet de sa pile", () => send("unstack"), "", () => S.tabs.find(t => t.id === S.active)?.stack != null],
-  ["import", "Importer depuis un autre navigateur", () => openSettings()],
+  ["tabs", "Onglets verticaux / horizontaux", () => setPref("tabs_position", P("tabs_position") === "left" ? "top" : "left")],
+  ["palette", "Thème clair / sombre", () => setPref("theme", root.hasAttribute("data-dark") ? "light" : "dark")],
+  ["download", "Téléchargements", () => send("downloads"), "Ctrl+J"],
+  ["import", "Importer depuis un autre navigateur", () => openSettings("import")],
+  ["clock", "Effacer les données de navigation", () => openSettings("privacy")],
   ["gear", "Réglages", () => openSettings()],
   ["code", "Outils de développement", () => send("devtools"), "F12"],
-  ["clock", "Effacer l'historique", () => { send("clearHistory"); toast("Historique effacé"); }],
 ];
 const fold = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const match = (q, ...f) => fold(q).split(/\s+/).filter(Boolean).every(w => f.some(x => fold(x).includes(w)));
 const looksUrl = q => /^[a-z][a-z0-9+.-]*:\S/i.test(q) || /^[^\s]+\.[a-z]{2,}(\/|:|$)/i.test(q) || /^localhost(:|\/|$)/.test(q);
+const fmtNum = n => n.toLocaleString("fr-FR", { maximumFractionDigits: 10 });
 function build() {
   const q = addr.value.trim(), groups = [];
+  if (q && lastResults.calc != null && P("calculator") !== false) {
+    const v = fmtNum(lastResults.calc);
+    groups.push(["", [{ icon: "cmd", t: "= " + v, u: "", k: "Copier le résultat", cls: "calc", act: () => { navigator.clipboard?.writeText(String(lastResults.calc)); toast(`${v} copié`); } }]]);
+  }
   if (q) {
     const [kw, ...rest] = q.split(/\s+/);
-    const eng = rest.length && S.settings.engines.find(e => e.keyword.toLowerCase() === kw.replace(/^!/, "").toLowerCase());
-    const def = S.settings.engines.find(e => e.keyword === S.settings.default) || S.settings.engines[0];
+    const eng = rest.length && S.engines.find(e => e.keyword.toLowerCase() === kw.replace(/^!/, "").toLowerCase());
+    const defKw = S.private ? P("engine_private") : S.defaultEngine;
+    const def = S.engines.find(e => e.keyword === defKw) || S.engines[0];
+    const newTab = P("search_new_tab");
     groups.push(["", [looksUrl(q)
       ? { icon: "globe", t: q, u: "", k: "Aller à l'adresse", act: nt => send(nt ? "open" : "nav", q) }
-      : { icon: "search", t: eng ? rest.join(" ") : q, u: "", k: `Rechercher avec ${(eng || def)?.name ?? ""}`, act: nt => { if (nt) send("newtab"); send("nav", q); } }]]);
+      : { icon: "search", t: eng ? rest.join(" ") : q, u: "", k: `Rechercher avec ${(eng || def)?.name ?? ""}`, act: nt => { if (nt || (newTab && S.url)) send("newtab"); send("nav", q); } }]]);
   }
-  const tabs = S.tabs.filter(t => t.id !== S.active && (!q || match(q, t.title, t.url))).slice(0, q ? 5 : 8)
-    .map(t => ({ fav: t, t: tabTitle(t), u: hostOf(t.url), k: t.loaded ? "Basculer" : "Basculer · déchargé", act: () => send("activate", t.id) }));
-  if (tabs.length) groups.push(["Onglets ouverts", tabs]);
+  if (P("sugg_tabs") !== false) {
+    const tabs = S.tabs.filter(t => t.id !== S.active && (!q || match(q, t.title, t.url))).slice(0, q ? 5 : 8)
+      .map(t => ({ fav: t, t: tabTitle(t), u: hostOf(t.url), k: t.loaded ? "Basculer" : "Basculer · déchargé", act: () => send("activate", t.id) }));
+    if (tabs.length) groups.push(["Onglets ouverts", tabs]);
+  }
   if (q) {
-    const bm = lastResults.bookmarks.map(b => ({ fav: b, t: b.title || b.url, u: b.url, k: b.folder || "Signet", act: nt => send(nt ? "open" : "nav", b.url) }));
-    if (bm.length) groups.push(["Signets", bm]);
+    const bm = P("sugg_bookmarks") === false ? [] : lastResults.bookmarks.map(b => ({ fav: b, t: b.title || b.url, u: b.url, k: b.folder || "Favori", act: nt => send(nt ? "open" : "nav", b.url) }));
+    if (bm.length) groups.push(["Favoris", bm]);
     const seen = new Set(lastResults.bookmarks.map(b => b.url));
-    const hist = lastResults.history.filter(h => !seen.has(h.url)).slice(0, 6)
+    const hist = P("sugg_history") === false ? [] : lastResults.history.filter(h => !seen.has(h.url)).slice(0, 6)
       .map(h => ({ fav: h, t: h.title || h.url, u: h.url, k: "", act: nt => send(nt ? "open" : "nav", h.url) }));
     if (hist.length) groups.push(["Historique", hist]);
   }
-  const cmds = COMMANDS.filter(c => (!c[4] || c[4]()) && (!q || match(q, c[1]))).slice(0, q ? 5 : 99).map(c => ({ icon: c[0], t: c[1], u: "", k: c[3] || "", act: c[2] }));
-  // F2 is Vivaldi's Quick Commands: actions lead; Ctrl+L stays an address bar.
-  if (cmds.length) paletteMode ? groups.unshift(["Commandes", cmds]) : groups.push(["Commandes", cmds]);
+  if (P("sugg_commands") !== false || paletteMode) {
+    const cmds = COMMANDS.filter(c => (!c[4] || c[4]()) && (!q || match(q, c[1]))).slice(0, q ? 5 : 99).map(c => ({ icon: c[0], t: c[1], u: "", k: c[3] || "", act: c[2] }));
+    // F2 is Vivaldi's Quick Commands: actions lead; Ctrl+L stays an address bar.
+    if (cmds.length) paletteMode ? groups.unshift(["Commandes", cmds]) : groups.push(["Commandes", cmds]);
+  }
   items = groups.flatMap(g => g[1]);
   hi = Math.min(hi, Math.max(0, items.length - 1));
   let n = 0;
   $("#results").innerHTML = groups.map(([name, list]) => (name ? `<div class="group">${name}</div>` : "") + list.map(it =>
-    `<div class="row${n === hi ? " hi" : ""}" role="option" data-n="${n++}">${it.fav ? fav(it.fav) : icon(it.icon)}<span class="t">${esc(it.t)}</span><span class="u">${esc(it.u)}</span><span class="k">${esc(it.k)}</span></div>`).join("")).join("");
+    `<div class="row${n === hi ? " hi" : ""}${it.cls ? " " + it.cls : ""}" role="option" data-n="${n++}">${it.fav ? fav(it.fav) : icon(it.icon)}<span class="t">${esc(it.t)}</span><span class="u">${esc(it.u)}</span><span class="k">${esc(it.k)}</span></div>`).join("")).join("");
   place("#sheet", $("#fieldwrap"), true);
 }
 function move(d) {
@@ -651,30 +898,33 @@ function show(id) {
   const was = !!openPop;
   openPop = id;
   $("#" + id).classList.add("on");
-  syncFull();
+  syncOverlay();
   if (!was) send("overlay", true);
 }
 function closeAll() {
   if (!openPop) return;
+  if (openPop === "bmPop" && bmEditing) { const u = bmEditing; bmEditing = null; send("bmEdit", { url: u, title: $("#bmName").value.trim() }); }
   $("#" + openPop).classList.remove("on");
   openPop = null; editing = false;
   $("#field").classList.remove("focus");
   addr.setAttribute("aria-expanded", "false");
   addr.blur();
   const v = $("#veil"); v.style.backgroundImage = ""; v.classList.remove("img");
-  syncFull(); renderToolbar();
+  syncOverlay(); renderToolbar();
   send("overlay", false);
 }
-$("#below").addEventListener("mousedown", e => { if (openPop && !e.target.closest(".site,.btn")) closeAll(); });
-$("#chrome").addEventListener("mousedown", e => { if (openPop && openPop !== "sheet" && !e.target.closest("#shield,#menubtn")) closeAll(); });
+$("#content").addEventListener("mousedown", e => { if (openPop && !e.target.closest(".site,.btn")) closeAll(); });
+$("#chrome").addEventListener("mousedown", e => { if (openPop && openPop !== "sheet" && !e.target.closest("#shield,#menubtn,#star,#bmbar")) closeAll(); });
 addEventListener("keydown", e => { if (e.key === "Escape") closeAll(); });
-addEventListener("resize", () => { if (openPop === "sheet") place("#sheet", $("#fieldwrap"), true); renderTabs(); });
+addEventListener("resize", () => { if (openPop === "sheet") place("#sheet", $("#fieldwrap"), true); if (openPop === "settings") centerSettings(); renderTabs(); renderBookmarksBar(); });
 
+/* entries: "-" | [icon, label, action, shortcut, iconHtml] */
 function showMenu(id, entries, x, y, anchor) {
   const box = $(id);
-  box.innerHTML = entries.map((e, i) => e === "-" ? "<hr>" : `<button class="row" role="menuitem" data-i="${i}">${icon(e[0])}<span class="t">${e[1]}</span><span class="k">${e[3] || ""}</span></button>`)
+  box.innerHTML = entries.map((e, i) => e === "-" ? "<hr>" : `<button class="row" role="menuitem" data-i="${i}">${e[4] || (e[0] ? icon(e[0]) : "")}<span class="t">${esc(e[1])}</span><span class="k">${e[3] || ""}</span></button>`)
     .join("").replace(/(<hr>)+/g, "<hr>").replace(/^<hr>|<hr>$/g, "");
   box.onclick = ev => { const r = ev.target.closest("[data-i]"); if (r) { const fn = entries[+r.dataset.i][2]; closeAll(); fn(); } };
+  box.onauxclick = ev => { const r = ev.target.closest("[data-i]"); const e = r && entries[+r.dataset.i]; if (ev.button === 1 && e?.[5]?.url) { send("openBg", e[5].url); } };
   show(id.slice(1));
   place(id, anchor, false, x, y);
   box.querySelector(".row")?.focus();
@@ -685,10 +935,13 @@ $("#menubtn").onclick = () => openPop === "menu" ? closeAll() : showMenu("#menu"
   ["reload", "Rouvrir l'onglet fermé", () => send("reopen"), "Ctrl+Maj+T"],
   "-",
   ["cmd", "Commandes rapides", () => openSheet(true), "F2"],
+  ["star", "Barre de favoris", () => send("toggleBar"), "Ctrl+Maj+B"],
+  ["download", "Téléchargements", () => send("downloads"), "Ctrl+J"],
   ["moon", "Décharger les autres onglets", () => send("unloadOthers")],
   "-",
-  ["import", "Importer favoris et historique", openSettings],
-  ["gear", "Réglages", openSettings],
+  ["import", "Importer favoris et historique", () => openSettings("import")],
+  ["clock", "Effacer les données de navigation", () => openSettings("privacy")],
+  ["gear", "Réglages", () => openSettings()],
   ["code", "Outils de développement", () => send("devtools"), "F12"],
 ], 0, 0, $("#menubtn"));
 for (const m of [$("#menu"), $("#ctx")]) m.addEventListener("keydown", e => {
@@ -702,27 +955,224 @@ function renderShields() {
   $("#shSite").textContent = sh.site || "Shields";
   $("#shCount").textContent = sh.on ? sh.count : "—";
   $("#shToggle").setAttribute("aria-checked", sh.on);
+  $("#shScripts").setAttribute("aria-checked", !!sh.noscript);
   $("#shLabel").textContent = sh.on ? "Shields activés pour ce site" : "Shields désactivés pour ce site";
-  $("#shFoot").textContent = sh.ready ? `${(sh.total || 0).toLocaleString("fr-FR")} bloqués au total · EasyList, EasyPrivacy, uBlock, Liste FR` : "Chargement des listes de filtres…";
+  $("#shFoot").textContent = sh.ready ? `${(sh.total || 0).toLocaleString("fr-FR")} bloqués au total · ${sh.lists} listes` : "Chargement des listes de filtres…";
 }
 $("#shield").onclick = () => { if (openPop === "shieldsPanel") return closeAll(); renderShields(); show("shieldsPanel"); place("#shieldsPanel", $("#shield")); };
 $("#shToggle").onclick = () => send("shields");
+$("#shScripts").onclick = () => send("noscript");
+$("#shSettings").onclick = () => openSettings("shields");
 
-/* Settings */
-function renderSettings() {
-  const st = S.settings, eng = $("#engine");
-  if (document.activeElement !== eng) eng.innerHTML = st.engines.map(e => `<option value="${esc(e.keyword)}"${e.keyword === st.default ? " selected" : ""}>${esc(e.name)} — ${esc(e.keyword)}</option>`).join("");
-  $("#maxLive").value = st.maxLive; $("#maxLiveOut").textContent = st.maxLive;
-  $("#idle").value = String(st.idle);
+/* ---------- settings ---------- */
+function setPref(k, v) { S.prefs[k] = v; applyPrefs(); send("pref", { k, v }); }
+function setSub(k, sub, v) { const o = { ...(S.prefs[k] || {}) }; o[sub] = v; setPref(k, o); }
+const yes = [true, "Activé"];
+const SECTIONS = [
+  { id: "general", icon: "home", title: "Général", items: [
+    { k: "startup", t: "Au démarrage", type: "select", o: [["session", "Reprendre où je m'étais arrêté"], ["ntp", "Ouvrir un nouvel onglet"], ["pages", "Ouvrir des pages précises"]] },
+    { k: "startup_pages", t: "Pages à ouvrir", d: "Une adresse par ligne.", type: "textarea", when: () => P("startup") === "pages" },
+    { k: "home", t: "Page d'accueil", d: "Vide = nouvel onglet Leirk.", type: "text", ph: "https://…" },
+    { k: "show_home", t: "Afficher le bouton Accueil", type: "toggle" },
+    { k: "close_last_quits", t: "Fermer la fenêtre avec le dernier onglet", type: "toggle" },
+    { t: "Navigateur par défaut", d: "Enregistre Leirk dans Windows puis ouvre le réglage des applications par défaut.", type: "button", label: "Définir par défaut", act: () => send("defaultBrowser") },
+  ]},
+  { id: "appearance", icon: "palette", title: "Apparence", items: [
+    { k: "theme", t: "Thème", type: "select", o: [["system", "Comme Windows"], ["light", "Clair"], ["dark", "Sombre"]] },
+    { k: "accent", t: "Couleur d'accent", type: "accent" },
+    { k: "density", t: "Densité", type: "select", o: [["standard", "Standard"], ["compact", "Compacte"]] },
+    { k: "ui_scale", t: "Taille de l'interface", type: "range", min: 80, max: 130, step: 5, unit: " %" },
+    { k: "tabs_position", t: "Onglets", type: "select", o: [["top", "En haut"], ["left", "Verticaux, à gauche"]] },
+    { k: "bookmarks_bar", t: "Barre de favoris", type: "select", o: [["always", "Toujours"], ["ntp", "Sur les nouveaux onglets"], ["never", "Jamais"]] },
+    { k: "full_url", t: "Afficher l'adresse complète", d: "Avec https:// et www.", type: "toggle" },
+    { k: "animations", t: "Animations de l'interface", type: "toggle" },
+  ]},
+  { id: "tabs", icon: "tabs", title: "Onglets", items: [
+    { k: "new_tab_pos", t: "Ouvrir les nouveaux onglets", type: "select", o: [["right", "À droite de l'onglet actif"], ["end", "À la fin"]] },
+    { k: "close_activate", t: "En fermant un onglet, afficher", type: "select", o: [["recent", "Le dernier utilisé"], ["right", "Celui de droite"], ["left", "Celui de gauche"]] },
+    { k: "links_bg", t: "Ouvrir les liens en arrière-plan", d: "Les liens qui ouvrent un nouvel onglet ne le sélectionnent pas.", type: "toggle" },
+    { k: "mru", t: "Ctrl+Tab dans l'ordre d'utilisation", d: "Bascule vers l'onglet utilisé juste avant.", type: "toggle" },
+    { k: "dbl_close", t: "Double-clic pour fermer un onglet", type: "toggle" },
+    { k: "wheel_switch", t: "Molette sur la barre pour changer d'onglet", type: "toggle" },
+    { k: "close_btn", t: "Bouton de fermeture", type: "select", o: [["hover", "Au survol"], ["always", "Toujours visible"]] },
+    { k: "dim_unloaded", t: "Atténuer les onglets déchargés", type: "toggle" },
+    { k: "tooltips", t: "Infobulles des onglets", type: "toggle" },
+  ]},
+  { id: "search", icon: "search", title: "Adresse et recherche", items: [
+    { k: "@default", t: "Moteur de recherche", type: "engine" },
+    { k: "engine_private", t: "Moteur en navigation privée", type: "engineSelect" },
+    { k: "search_new_tab", t: "Rechercher dans un nouvel onglet", type: "toggle" },
+    { k: "calculator", t: "Calculatrice dans la barre d'adresse", d: "Tapez 12*3,5 pour voir 42.", type: "toggle" },
+    { h: "Suggestions" },
+    { k: "sugg_tabs", t: "Onglets ouverts", type: "toggle" },
+    { k: "sugg_bookmarks", t: "Favoris", type: "toggle" },
+    { k: "sugg_history", t: "Historique", type: "toggle" },
+    { k: "sugg_commands", t: "Commandes", type: "toggle" },
+    { h: "Moteurs et mots-clés" },
+    { type: "engines" },
+  ]},
+  { id: "shields", icon: "shield", title: "Shields", items: [
+    { k: "shields_level", t: "Blocage des pubs et traqueurs", type: "select", o: [["standard", "Standard"], ["aggressive", "Agressif"], ["off", "Désactivé"]],
+      d: "Agressif ajoute AdGuard Base, Tracking et URL Tracking : plus fort, peut casser certains sites." },
+    { k: "block_pings", t: "Bloquer les pings de suivi des liens", type: "toggle" },
+    { h: "Listes de filtres" },
+    { k: "lists.default", t: "Filtres Brave par défaut", d: "uBlock Origin (2020→2026, badware, quick fixes, unbreak), EasyList, URLhaus, listes Brave.", type: "sub" },
+    { k: "lists.privacy", t: "Confidentialité", d: "EasyPrivacy et uBlock Privacy.", type: "sub" },
+    { k: "lists.cookies", t: "Bannières de cookies", d: "Fanboy Cookiemonster, uBlock cookies, liste Brave.", type: "sub" },
+    { k: "lists.annoyances", t: "Distractions", d: "Pop-ups de newsletter, widgets de chat, bandeaux.", type: "sub" },
+    { k: "lists.mobile", t: "Promotions d'applications", type: "sub" },
+    { k: "lists.social", t: "Boutons et widgets des réseaux sociaux", type: "sub" },
+    { k: "lists.fr", t: "Sites français", d: "AdGuard Français et Liste FR.", type: "sub" },
+    { k: "custom_lists", t: "Listes personnalisées", d: "Une adresse de liste par ligne (format uBlock / Adblock Plus).", type: "textarea" },
+    { k: "custom_rules", t: "Mes filtres", d: "Une règle par ligne, par ex. ||pub.exemple.fr^ ou exemple.fr##.bandeau", type: "textarea" },
+    { type: "shieldsInfo" },
+  ]},
+  { id: "privacy", icon: "lock", title: "Confidentialité", items: [
+    { k: "https_upgrade", t: "Passer en HTTPS", d: "Essaie toujours la version sécurisée d'un site ; revient en HTTP si elle n'existe pas.", type: "toggle" },
+    { k: "strip_params", t: "Retirer les paramètres de pistage des adresses", d: "utm_*, fbclid, gclid, msclkid…", type: "toggle" },
+    { k: "gpc", t: "Global Privacy Control", d: "Demande aux sites de ne pas vendre ni partager vos données.", type: "toggle" },
+    { k: "tracking", t: "Protection contre le pistage du moteur", type: "select", o: [["off", "Désactivée"], ["basic", "Basique"], ["balanced", "Équilibrée"], ["strict", "Stricte"]] },
+    { k: "noscript_sites", t: "Sites sans JavaScript", d: "Ajoutez ou retirez un site ; aussi depuis le panneau Shields.", type: "sites" },
+    { k: "passwords", t: "Proposer d'enregistrer les mots de passe", type: "toggle" },
+    { k: "autofill", t: "Saisie automatique des formulaires", type: "toggle" },
+    { h: "Effacer les données de navigation" },
+    { type: "clear" },
+    { h: "À la fermeture de Leirk, effacer" },
+    { k: "clear_on_exit.history", t: "L'historique", type: "sub" },
+    { k: "clear_on_exit.cookies", t: "Les cookies et données des sites", type: "sub" },
+    { k: "clear_on_exit.cache", t: "Le cache", type: "sub" },
+  ]},
+  { id: "memory", icon: "cpu", title: "Mémoire et performances", items: [
+    { k: "@maxLive", t: "Onglets gardés en mémoire", d: "Les autres sont déchargés et se rechargent quand vous y revenez.", type: "range", min: 1, max: 12, step: 1 },
+    { k: "@idle", t: "Décharger un onglet inactif après", type: "select", o: [[5, "5 min"], [15, "15 min"], [30, "30 min"], [60, "1 h"], [0, "Jamais"]] },
+    { k: "suspend_bg", t: "Mettre en veille les onglets en arrière-plan", d: "Gèle leurs scripts et minuteries jusqu'à leur retour.", type: "toggle" },
+    { k: "keep_audible", t: "Ne pas décharger les onglets qui jouent du son", type: "toggle" },
+    { k: "never_unload", t: "Sites jamais déchargés", type: "sites" },
+    { k: "autoplay_block", t: "Bloquer la lecture automatique des médias", d: "Les vidéos attendent un clic : moins de RAM et de GPU. Redémarrage requis.", type: "toggle" },
+    { k: "gpu", t: "Accélération matérielle", d: "La désactiver supprime ~500 Mo du processus GPU, au prix de la fluidité. Redémarrage requis.", type: "toggle" },
+  ]},
+  { id: "web", icon: "hand", title: "Pages web et gestes", items: [
+    { k: "zoom", t: "Zoom par défaut", type: "select", o: [75, 80, 90, 100, 110, 125, 150, 175, 200].map(z => [z, z + " %"]) },
+    { k: "gestures", t: "Gestes de la souris", d: "Maintenez le clic droit et tracez : ← précédente · → suivante · ↓ nouvel onglet · ↓→ fermer · ↑↓ actualiser · ↓← rouvrir.", type: "toggle" },
+    { k: "rocker", t: "Gestes à bascule", d: "Clic droit maintenu + clic gauche : précédente. Clic gauche maintenu + clic droit : suivante.", type: "toggle" },
+  ]},
+  { id: "downloads", icon: "download", title: "Téléchargements", items: [
+    { k: "download_dir", t: "Dossier de téléchargement", d: "Vide = dossier Téléchargements de Windows.", type: "text", ph: "C:\\Users\\…\\Downloads" },
+    { t: "Ouvrir le dossier", type: "button", label: "Ouvrir", act: () => send("openFolder", "downloads") },
+  ]},
+  { id: "import", icon: "import", title: "Importer", items: [{ type: "import" }] },
+  { id: "keys", icon: "key", title: "Raccourcis", items: [{ type: "keys" }] },
+  { id: "advanced", icon: "gear", title: "Avancé", items: [
+    { t: "Dossier des données de Leirk", d: "Session, favoris, historique, listes de filtres, journal.", type: "button", label: "Ouvrir", act: () => send("openFolder", "data") },
+    { t: "Réinitialiser les réglages", d: "Remet chaque réglage à sa valeur d'origine. Favoris, historique et onglets sont conservés.", type: "button", label: "Réinitialiser", act: () => { if (confirm("Réinitialiser tous les réglages ?")) send("resetPrefs"); } },
+  ]},
+];
+const KEYS = [["Nouvel onglet", "Ctrl+T"], ["Onglet privé", "Ctrl+Maj+N"], ["Fermer l'onglet", "Ctrl+W"], ["Rouvrir l'onglet fermé", "Ctrl+Maj+T"],
+  ["Onglet suivant / précédent", "Ctrl+Tab · Ctrl+Maj+Tab"], ["Aller à l'onglet 1…8 / dernier", "Ctrl+1…8 / Ctrl+9"], ["Barre d'adresse", "Ctrl+L · Alt+D · F6"],
+  ["Commandes rapides", "F2 · Ctrl+K"], ["Ajouter aux favoris", "Ctrl+D"], ["Barre de favoris", "Ctrl+Maj+B"], ["Téléchargements", "Ctrl+J"],
+  ["Rechercher dans la page", "Ctrl+F"], ["Zoom", "Ctrl+molette · Ctrl+= / Ctrl+-"], ["Accueil", "Alt+Origine"], ["Outils de développement", "F12"],
+  ["Page précédente / suivante", "Alt+← / Alt+→"]];
+let setSection = "general";
+function openSettings(section) {
+  if (section) setSection = section;
+  $("#setsearch").value = "";
+  show("settings"); centerSettings(); renderSettings(true);
+  if (setSection === "import") send("imports");
 }
-function openSettings() { renderSettings(); send("imports"); show("settings"); place("#settings", $("#menubtn")); }
-$("#engine").onchange = e => send("setting", { k: "default", v: e.target.value });
-$("#maxLive").oninput = e => { $("#maxLiveOut").textContent = e.target.value; };
-$("#maxLive").onchange = e => send("setting", { k: "maxLive", v: +e.target.value });
-$("#idle").onchange = e => send("setting", { k: "idle", v: +e.target.value });
-$("#importList").onclick = e => { const r = e.target.closest("[data-i]"); if (r) { r.querySelector(".k").textContent = "Import…"; send("import", +r.dataset.i); } };
-$("#importAll").onclick = () => { toast("Import en cours…"); send("import", null); };
-$("#clearHist").onclick = () => { send("clearHistory"); toast("Historique effacé"); };
+function centerSettings() { const p = $("#settings"); p.style.left = (innerWidth - p.offsetWidth) / 2 + "px"; p.style.top = Math.max(40, (innerHeight - p.offsetHeight) / 2) + "px"; }
+function prefVal(k) {
+  if (k === "@maxLive") return S.maxLive; if (k === "@idle") return S.idle; if (k === "@default") return S.defaultEngine;
+  if (k.includes(".")) { const [a, b] = k.split("."); return (S.prefs[a] || {})[b]; }
+  return S.prefs[k];
+}
+function itemHtml(it) {
+  if (it.h) return `<h3>${esc(it.h)}</h3>`;
+  if (it.when && !it.when()) return "";
+  const v = it.k ? prefVal(it.k) : null, k = esc(it.k || "");
+  const head = `<div><div>${esc(it.t || "")}</div>${it.d ? `<small>${esc(it.d)}</small>` : ""}</div>`;
+  switch (it.type) {
+    case "toggle": case "sub": return `<div class="set">${head}<div class="ctl"><button class="toggle" role="switch" data-k="${k}" aria-checked="${v !== false && v != null && v !== 0 ? !!v : false}"></button></div></div>`;
+    case "select": return `<div class="set">${head}<div class="ctl"><select data-k="${k}">${it.o.map(([ov, ol]) => `<option value="${esc(ov)}"${String(ov) === String(v) ? " selected" : ""}>${esc(ol)}</option>`).join("")}</select></div></div>`;
+    case "range": return `<div class="set">${head}<div class="ctl"><input type="range" data-k="${k}" min="${it.min}" max="${it.max}" step="${it.step}" value="${v}"><span class="out">${v}${it.unit || ""}</span></div></div>`;
+    case "text": return `<div class="set col">${head}<input class="in" data-k="${k}" value="${esc(v)}" placeholder="${esc(it.ph || "")}" spellcheck="false"></div>`;
+    case "textarea": return `<div class="set col">${head}<textarea class="in" rows="4" data-k="${k}" spellcheck="false">${esc(v)}</textarea></div>`;
+    case "button": return `<div class="set">${head}<div class="ctl"><button class="btn" data-act="${esc(it.t)}">${esc(it.label)}</button></div></div>`;
+    case "accent": return `<div class="set">${head}<div class="swatches">${[["ember", "oklch(0.62 0.19 38)", "Braise"], ["blue", "oklch(0.6 0.17 255)", "Bleu"], ["violet", "oklch(0.6 0.2 295)", "Violet"], ["green", "oklch(0.6 0.14 155)", "Vert"], ["pink", "oklch(0.62 0.2 355)", "Rose"], ["graphite", "oklch(0.5 0.02 255)", "Graphite"]]
+      .map(([n, c, l]) => `<button class="sw${v === n ? " on" : ""}" data-accent="${n}" style="background:${c}" title="${l}" aria-label="${l}"></button>`).join("")}</div></div>`;
+    case "engine": case "engineSelect": return `<div class="set">${head}<div class="ctl"><select data-k="${k}">${S.engines.map(e => `<option value="${esc(e.keyword)}"${e.keyword === v ? " selected" : ""}>${esc(e.name)}</option>`).join("")}</select></div></div>`;
+    case "engines": return `<div>${S.engines.map(e => `<div class="engine-row"><span>${esc(e.name)}</span><span><kbd>${esc(e.keyword)}</kbd></span><span class="u">${esc(e.url)}</span>${e.keyword === S.defaultEngine ? "<span></span>" : `<button class="icon" data-engine-del="${esc(e.keyword)}" aria-label="Supprimer ${esc(e.name)}">${icon("trash")}</button>`}</div>`).join("")}
+      <div class="inline" style="margin-top:10px"><input class="in" id="engName" placeholder="Nom"><input class="in" id="engKw" placeholder="Mot-clé" style="flex:.4"><input class="in" id="engUrl" placeholder="https://exemple.fr/?q=%s" style="flex:2"><button class="btn" id="engAdd">Ajouter</button></div>
+      <small style="color:var(--ink-3)">Tapez le mot-clé puis votre recherche dans la barre d'adresse, avec ou sans « ! » : « yt chat », « !w Rust ».</small></div>`;
+    case "sites": return `<div class="set col">${head}<div class="chips">${(v || []).map(h => `<span class="chip">${esc(h)}<button data-site-del="${k}" data-host="${esc(h)}" aria-label="Retirer ${esc(h)}">${icon("x")}</button></span>`).join("") || `<small>Aucun site.</small>`}</div>
+      <div class="inline"><input class="in" data-site-input="${k}" placeholder="exemple.fr"><button class="btn" data-site-add="${k}">Ajouter</button></div></div>`;
+    case "clear": return `<div class="set col"><div class="checks">${[["history", "Historique"], ["cookies", "Cookies et données des sites"], ["cache", "Cache"], ["downloads", "Liste des téléchargements"], ["autofill", "Saisie automatique"], ["passwords", "Mots de passe enregistrés"]]
+      .map(([v, l], i) => `<label><input type="checkbox" data-clear="${v}"${i < 3 ? " checked" : ""}>${l}</label>`).join("")}</div>
+      <div class="inline"><select id="clearRange"><option value="3600">Dernière heure</option><option value="86400">Dernières 24 heures</option><option value="604800">7 derniers jours</option><option value="2419200">4 dernières semaines</option><option value="0">Toutes les données</option></select><button class="btn primary" id="clearNow">Effacer</button></div></div>`;
+    case "shieldsInfo": return `<div class="set">${head}<small>${S.shields.ready ? `${S.shields.lists} listes chargées · ${(S.shields.total || 0).toLocaleString("fr-FR")} éléments bloqués depuis l'installation.` : "Téléchargement des listes…"} Les listes se mettent à jour tous les 4 jours.</small></div>`;
+    case "import": return `<div class="set col"><div><div>Importez favoris, historique et moteurs de recherche.</div><small>Les mots de passe ne peuvent pas être importés : Chrome, Brave et Edge les chiffrent avec une clé réservée à eux.</small></div><div id="importList"><small>Recherche des navigateurs…</small></div><div><button class="btn primary" id="importAll">Tout importer</button></div></div>`;
+    case "keys": return `<div class="keys">${KEYS.map(([a, b]) => `<span>${esc(a)}</span><kbd>${esc(b)}</kbd>`).join("")}</div>`;
+  }
+  return "";
+}
+function renderSettings(full) {
+  const q = $("#setsearch").value.trim();
+  $("#setsections").innerHTML = SECTIONS.map(s => `<button data-sec="${s.id}" class="${!q && s.id === setSection ? "on" : ""}">${icon(s.icon)}${esc(s.title)}</button>`).join("");
+  if (!full && document.activeElement && $("#setbody").contains(document.activeElement) && /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return; // never re-render under the cursor
+  const body = $("#setbody"), scroll = body.scrollTop;
+  const banner = S.restart ? `<div class="banner"><span>Redémarrez Leirk pour appliquer certains changements.</span></div>` : "";
+  if (q) {
+    const hits = SECTIONS.flatMap(s => s.items.filter(it => it.t && match(q, it.t, it.d, s.title)).map(it => ({ s, it })));
+    body.innerHTML = banner + `<h2>Résultats</h2>` + (hits.length ? hits.map(({ s, it }) => `<h3>${esc(s.title)}</h3>` + itemHtml(it)).join("") : `<p style="color:var(--ink-3)">Aucun réglage ne correspond.</p>`);
+  } else {
+    const s = SECTIONS.find(s => s.id === setSection);
+    body.innerHTML = banner + `<h2>${esc(s.title)}</h2>` + s.items.map(itemHtml).join("");
+  }
+  if (!full) body.scrollTop = scroll; else body.scrollTop = 0;
+}
+$("#setsearch").addEventListener("input", () => renderSettings(true));
+$("#setsections").addEventListener("click", e => { const b = e.target.closest("[data-sec]"); if (!b) return; setSection = b.dataset.sec; $("#setsearch").value = ""; renderSettings(true); if (setSection === "import") send("imports"); });
+function writePref(k, v) {
+  if (k === "@maxLive") return send("setting", { k: "maxLive", v: +v });
+  if (k === "@idle") return send("setting", { k: "idle", v: +v });
+  if (k === "@default") return send("setting", { k: "default", v });
+  if (k.includes(".")) { const [a, b] = k.split("."); return setSub(a, b, v); }
+  setPref(k, v);
+}
+$("#setbody").addEventListener("click", e => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.classList.contains("toggle")) { const on = t.getAttribute("aria-checked") !== "true"; t.setAttribute("aria-checked", on); writePref(t.dataset.k, on); return; }
+  if (t.dataset.accent) { writePref("accent", t.dataset.accent); document.querySelectorAll(".sw").forEach(s => s.classList.toggle("on", s === t)); return; }
+  if (t.dataset.act) { const it = SECTIONS.flatMap(s => s.items).find(i => i.t === t.dataset.act); return it?.act(); }
+  if (t.dataset.engineDel) return send("engineRemove", t.dataset.engineDel);
+  if (t.id === "engAdd") {
+    const e2 = { name: $("#engName").value.trim(), keyword: $("#engKw").value.trim(), url: $("#engUrl").value.trim() };
+    if (!e2.name || !e2.keyword || !e2.url.includes("%s")) return toast("Nom, mot-clé et adresse contenant %s sont requis.");
+    return send("engineAdd", e2);
+  }
+  if (t.dataset.siteDel) { const k = t.dataset.siteDel; return writePref(k, (prefVal(k) || []).filter(h => h !== t.dataset.host)); }
+  if (t.dataset.siteAdd) {
+    const k = t.dataset.siteAdd, inp = document.querySelector(`[data-site-input="${k}"]`);
+    const h = hostOf(inp.value.includes("://") ? inp.value : "https://" + inp.value.trim()) || inp.value.trim();
+    if (h) writePref(k, [...new Set([...(prefVal(k) || []), h])]);
+    return renderSettings(false);
+  }
+  if (t.id === "clearNow") {
+    const kinds = [...document.querySelectorAll("[data-clear]:checked")].map(c => c.dataset.clear);
+    if (!kinds.length) return;
+    send("clearData", { since: +$("#clearRange").value, kinds }); toast("Données effacées");
+    return;
+  }
+  if (t.id === "importAll") { toast("Import en cours…"); return send("import", null); }
+  const imp = t.closest("#importList [data-i]"); if (imp) { imp.querySelector(".k").textContent = "Import…"; send("import", +imp.dataset.i); }
+});
+$("#setbody").addEventListener("change", e => {
+  const el = e.target, k = el.dataset.k; if (!k) return;
+  const raw = el.value;
+  const v = el.type === "range" ? +raw : el.tagName === "SELECT" && /^\d+$/.test(raw) && !k.startsWith("@default") && k !== "engine_private" ? +raw : raw;
+  writePref(k, v);
+  if (k === "startup") renderSettings(false);
+});
+$("#setbody").addEventListener("input", e => { const el = e.target; if (el.type === "range") el.nextElementSibling.textContent = el.value + (el.dataset.k === "ui_scale" ? " %" : ""); });
 
 /* New tab page */
 function renderNtp() {
@@ -735,14 +1185,14 @@ function renderNtp() {
   $("#sites").innerHTML = sites.length
     ? sites.map(s => `<button class="site" data-u="${esc(s.url)}" title="${esc(s.url)}">${fav(s)}<span>${esc(s.title || hostOf(s.url))}</span></button>`).join("")
     : `<div class="empty" style="grid-column:1/-1"><p>Vos sites fréquents apparaîtront ici.<br>Récupérez vos favoris et votre historique depuis Brave, Chrome, Edge, Vivaldi ou Firefox.</p><button class="btn primary" id="ntpImport">Importer depuis un navigateur</button></div>`;
-  const b = $("#ntpImport"); if (b) b.onclick = openSettings;
+  const b = $("#ntpImport"); if (b) b.onclick = () => openSettings("import");
 }
 $("#sites").addEventListener("click", e => { const s = e.target.closest("[data-u]"); if (s) send("nav", s.dataset.u); });
 
 let toastTimer;
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 2600); }
 
-new ResizeObserver(() => { sendLayout(); syncFull(); }).observe($("#chrome"));
+new ResizeObserver(sendLayout).observe($("#content"));
 sendLayout();
 addEventListener("load", () => { if (!S.url) focusField(); });
 </script>

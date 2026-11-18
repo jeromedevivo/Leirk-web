@@ -1,11 +1,13 @@
 #![windows_subsystem = "windows"]
 #![allow(unsafe_op_in_unsafe_fn)] // every COM call inside these fns is a WebView2 FFI call
 //! Leirk: a Rust shell over WebView2. Tabs are data; only visible and recently used tabs own a webview.
+use leirk::calc::calculate;
 use leirk::import;
-use leirk::omnibox::resolve;
-use leirk::shields::{host, Shields};
-use leirk::store::{self, Bookmark, History, Profile};
-use leirk::tabs::{tile_rects, TabId, Tabs};
+use leirk::omnibox::{resolve, Engine};
+use leirk::privacy::{https_upgrade, strip_tracking};
+use leirk::shields::{host, list_urls, Shields, Verdict, RESOURCES_URL};
+use leirk::store::{self, merged_prefs, Bookmark, History, Profile};
+use leirk::tabs::{tile_rects, CloseFocus, Tab, TabId, Tabs};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -19,12 +21,16 @@ use tao::platform::windows::WindowBuilderExtWindows;
 use tao::window::{ResizeDirection, Window, WindowBuilder};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::*;
-use windows::core::{w, Interface, BOOL, PWSTR};
+use windows::core::{w, Interface, BOOL, HSTRING, PWSTR};
 use windows::Win32::System::Com::StructuredStorage::{CreateStreamOnHGlobal, GetHGlobalFromStream};
 use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VIRTUAL_KEY, VK_CONTROL, VK_MENU, VK_SHIFT};
-use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOP, SWP_NOMOVE, SWP_NOSIZE};
-use wry::{MemoryUsageLevel, NewWindowResponse, PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder, WebViewExtWindows};
+use windows::Win32::UI::Shell::SHCreateMemStream;
+use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE};
+use wry::{
+    MemoryUsageLevel, NewWindowResponse, PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows,
+    WebViewExtWindows,
+};
 
 enum Ev {
     Ui(String),
@@ -38,11 +44,17 @@ enum Ev {
     Audio(TabId, bool),
     Focus(TabId),
     Backdrop(String),
-    ShieldsReady(Shields),
+    ShieldsReady(Shields, u64, usize),
+    Cosmetic(TabId, Vec<String>, Vec<String>),
+    Gesture(String),
+    Navigate(TabId, String),
+    Quit,
 }
 
 const TICK: Duration = Duration::from_secs(30);
 const GAP: f64 = 2.0;
+/// Chromium switches wry passes by default; every webview of one environment must use the same set.
+const WRY_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
 
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
@@ -57,16 +69,34 @@ fn shortcut(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'static str>
         (true, false, false, _) if key == 'T' || key == 'N' => "newtab",
         (true, false, false, _) if key == 'W' => "close",
         (true, false, false, _) if key == 'L' => "focus",
-        (true, false, false, _) if key == 'K' => "palette",
+        (true, false, false, _) if key == 'K' || key == 'E' => "palette",
         (true, false, false, _) if key == 'D' => "bookmark",
+        (true, false, false, _) if key == 'J' => "downloads",
         (true, false, false, _) if ('1'..='9').contains(&key) => DIGITS[(vk - '1' as u32) as usize],
         (true, true, false, _) if key == 'N' => "private",
         (true, true, false, _) if key == 'T' => "reopen",
+        (true, true, false, _) if key == 'B' => "toggleBar",
         (true, false, false, 0x09) => "next",
         (true, true, false, 0x09) => "prev",
+        (true, false, false, 0x22) => "next", // Ctrl+PageDown
+        (true, false, false, 0x21) => "prev", // Ctrl+PageUp
         (false, false, true, _) if key == 'D' => "focus",
+        (false, false, true, 0x24) => "home", // Alt+Home
         (false, false, false, 0x71) => "palette", // F2, as in Vivaldi
         (false, false, false, 0x75) => "focus",   // F6
+        _ => return None,
+    })
+}
+
+/// Vivaldi's default gestures (hold right button and draw) plus rocker gestures B/F.
+fn gesture(path: &str) -> Option<&'static str> {
+    Some(match path {
+        "L" | "B" => "back",
+        "R" | "F" => "forward",
+        "D" => "newtab",
+        "DR" => "close",
+        "UD" => "reload",
+        "DL" => "reopen",
         _ => return None,
     })
 }
@@ -75,16 +105,38 @@ fn key_down(vk: VIRTUAL_KEY) -> bool {
     unsafe { GetKeyState(vk.0 as i32) < 0 }
 }
 
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
 fn b64(data: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for c in data.chunks(3) {
         let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
         for i in 0..4 {
-            out.push(if i <= c.len() { T[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+            out.push(if i <= c.len() { B64[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
         }
     }
     out
+}
+
+fn unb64(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0);
+    for c in s.bytes().filter(|&c| c != b'=') {
+        acc = acc << 6 | B64.iter().position(|&x| x == c)? as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// `data:<mime>;base64,<payload>` -> (mime, bytes): how adblock-rust hands over redirect resources.
+fn data_url(u: &str) -> Option<(String, Vec<u8>)> {
+    let (head, payload) = u.strip_prefix("data:")?.split_once(',')?;
+    let mime = head.strip_suffix(";base64")?;
+    Some((mime.to_string(), unb64(payload)?))
 }
 
 fn pwstr(f: impl FnOnce(&mut PWSTR) -> windows::core::Result<()>) -> String {
@@ -92,50 +144,124 @@ fn pwstr(f: impl FnOnce(&mut PWSTR) -> windows::core::Result<()>) -> String {
     if f(&mut p).is_ok() { take_pwstr(p) } else { String::new() }
 }
 
-/// Downloads the filter lists Brave ships with (refreshed every 4 days) and builds the engine off the UI thread.
-fn load_shields(dir: PathBuf, proxy: EventLoopProxy<Ev>) {
-    std::thread::spawn(move || {
-        use std::os::windows::process::CommandExt;
-        let lists = [
-            ("easylist", "https://easylist.to/easylist/easylist.txt"),
-            ("easyprivacy", "https://easylist.to/easylist/easyprivacy.txt"),
-            ("ubo", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt"),
-            ("ubo-privacy", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy.txt"),
-            ("liste_fr", "https://easylist-downloads.adblockplus.org/liste_fr.txt"),
-        ];
-        let _ = std::fs::create_dir_all(&dir);
-        let mut all = String::new();
-        for (name, url) in lists {
-            let file = dir.join(format!("{name}.txt"));
-            let fresh = std::fs::metadata(&file)
-                .and_then(|m| m.modified())
-                .is_ok_and(|t| t.elapsed().unwrap_or_default() < Duration::from_secs(4 * 86400));
-            if !fresh {
-                let tmp = file.with_extension("part");
-                let ok = std::process::Command::new("curl.exe")
-                    .args(["-sfL", "--max-time", "90", "-o"])
-                    .arg(&tmp)
-                    .arg(url)
-                    .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-                    .status()
-                    .is_ok_and(|s| s.success());
-                if ok {
-                    let _ = std::fs::rename(&tmp, &file);
-                }
-            }
-            if let Ok(s) = std::fs::read_to_string(&file) {
-                all.push_str(&s);
-                all.push('\n');
-            }
+/// Page script: F2/F6 forwarding, mouse and rocker gestures, generic cosmetic reporting, GPC.
+/// Pages can post anything to the host; Rust honours only these message shapes.
+const PAGE_JS: &str = r#"(function(){
+if(window.__leirk)return;window.__leirk=1;
+var top=window.top===window;
+if(__GPC__){try{Object.defineProperty(Navigator.prototype,'globalPrivacyControl',{get:function(){return true},configurable:true})}catch(e){}}
+var post=function(m){try{window.ipc.postMessage(m)}catch(e){}};
+addEventListener('keydown',function(e){if((e.key==='F2'||e.key==='F6')&&!e.ctrlKey&&!e.altKey&&!e.shiftKey){e.preventDefault();post(e.key)}},true);
+if(!top)return;
+window.__lg=__LG__;window.__rk=__RK__;
+var down=false,x=0,y=0,path='',moved=false,left=false,eat=false;
+addEventListener('mousedown',function(e){
+ if(e.button===2){if(left&&window.__rk){post('g:F');eat=true;e.preventDefault();return}down=true;x=e.clientX;y=e.clientY;path='';moved=false}
+ else if(e.button===0){left=true;if(down&&window.__rk){post('g:B');eat=true;down=false;e.preventDefault();e.stopPropagation()}}
+},true);
+addEventListener('mousemove',function(e){if(!down||!window.__lg)return;var dx=e.clientX-x,dy=e.clientY-y;if(Math.abs(dx)<24&&Math.abs(dy)<24)return;
+ var d=Math.abs(dx)>Math.abs(dy)?(dx>0?'R':'L'):(dy>0?'D':'U');if(path.slice(-1)!==d)path+=d;x=e.clientX;y=e.clientY;moved=true},true);
+addEventListener('mouseup',function(e){if(e.button===0)left=false;if(e.button===2&&down){down=false;if(moved&&path){post('g:'+path);eat=true}}},true);
+addEventListener('contextmenu',function(e){if(eat){e.preventDefault();e.stopPropagation();eat=false}},true);
+window.__leirkHide=function(css){var s=document.createElement('style');s.textContent=css;(document.head||document.documentElement).appendChild(s)};
+var sc=new Set,si=new Set,qc=[],qi=[],t=0;
+function add(el){var l=el.classList;if(l)for(var i=0;i<l.length;i++){var c=l[i];if(!sc.has(c)&&sc.size<20000){sc.add(c);qc.push(c)}}if(el.id&&!si.has(el.id)&&si.size<20000){si.add(el.id);qi.push(el.id)}}
+function scan(r){if(r.nodeType!==1)return;add(r);var l=r.querySelectorAll('[class],[id]');for(var i=0;i<l.length;i++)add(l[i])}
+function flush(){t=0;if(qc.length||qi.length)post('c:'+JSON.stringify({c:qc.splice(0),i:qi.splice(0)}))}
+function sched(){if(!t)t=setTimeout(flush,120)}
+function start(){scan(document.documentElement);flush();new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){var n=ms[i].addedNodes;for(var j=0;j<n.length;j++)scan(n[j])}sched()}).observe(document.documentElement,{childList:true,subtree:true})}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
+})();"#;
+
+/// Cache file for a list URL (lists are refreshed every 4 days).
+fn cache_name(url: &str) -> String {
+    let s: String = url.trim_start_matches("https://").chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' }).collect();
+    s.chars().rev().take(120).collect::<Vec<_>>().into_iter().rev().collect()
+}
+
+fn fetch(url: &str, dir: &Path) -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    let file = dir.join(cache_name(url));
+    let fresh = std::fs::metadata(&file)
+        .and_then(|m| m.modified())
+        .is_ok_and(|t| t.elapsed().unwrap_or_default() < Duration::from_secs(4 * 86400));
+    if !fresh {
+        let tmp = file.with_extension("part");
+        let ok = std::process::Command::new("curl.exe")
+            .args(["-sfL", "--compressed", "--max-time", "90", "-o"])
+            .arg(&tmp)
+            .arg(url)
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .status()
+            .is_ok_and(|s| s.success());
+        if ok {
+            let _ = std::fs::rename(&tmp, &file);
         }
-        let _ = proxy.send_event(Ev::ShieldsReady(Shields::new(&all)));
+    }
+    std::fs::read_to_string(&file).ok() // a stale copy beats no protection when offline
+}
+
+/// Downloads Brave's lists and scriptlet resources in parallel and builds the engine off the UI thread.
+fn load_shields(dir: PathBuf, urls: Vec<String>, custom: String, generation: u64, proxy: EventLoopProxy<Ev>) {
+    std::thread::spawn(move || {
+        let _ = std::fs::create_dir_all(&dir);
+        let texts: Vec<Option<String>> = urls
+            .chunks(8)
+            .flat_map(|chunk| {
+                std::thread::scope(|s| {
+                    let hs: Vec<_> = chunk.iter().map(|u| s.spawn(|| fetch(u, &dir))).collect();
+                    hs.into_iter().map(|h| h.join().ok().flatten()).collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let loaded = texts.iter().filter(|t| t.is_some()).count();
+        let mut all: String = texts.into_iter().flatten().collect::<Vec<_>>().join("\n");
+        all.push('\n');
+        all.push_str(&custom);
+        let res = fetch(RESOURCES_URL, &dir).unwrap_or_default();
+        let _ = proxy.send_event(Ev::ShieldsReady(Shields::new(&all).with_resources(&res), generation, loaded));
     });
+}
+
+/// State the WebView2 callbacks read while the event loop runs.
+struct Shared {
+    prefs: RefCell<Value>,
+    shields: RefCell<Option<Shields>>,
+    doc_scripts: RefCell<HashMap<TabId, String>>,
+    upgraded: RefCell<HashMap<TabId, String>>,
+    http_only: RefCell<HashSet<String>>,
+}
+
+impl Shared {
+    fn on(&self, k: &str) -> bool {
+        self.prefs.borrow()[k].as_bool().unwrap_or(false)
+    }
+    fn noscript(&self, url: &str) -> bool {
+        let h = host(url);
+        self.prefs.borrow()["noscript_sites"].as_array().is_some_and(|a| a.iter().any(|s| s == h))
+    }
+}
+
+fn resource_kind(ctx: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> &'static str {
+    match ctx {
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT => "sub_frame",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET => "stylesheet",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE => "image",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA => "media",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT => "font",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT => "script",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_XML_HTTP_REQUEST | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH => "xmlhttprequest",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_WEBSOCKET => "websocket",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING => "ping",
+        _ => "other",
+    }
 }
 
 struct App {
     window: Window,
     ui: WebView,
     ctx: WebContext,
+    args: String,
     proxy: EventLoopProxy<Ev>,
     dir: PathBuf,
     tabs: Tabs,
@@ -143,61 +269,77 @@ struct App {
     shown: HashSet<TabId>,
     profile: Profile,
     history: History,
-    shields: Rc<RefCell<Option<Shields>>>,
+    shared: Rc<Shared>,
+    shields_gen: u64,
+    lists_loaded: usize,
     blocked: HashMap<TabId, u32>,
     blocked_total: u64,
     closed: Vec<String>,
     loading: HashSet<TabId>,
-    top: f64,
+    content: (f64, f64, f64, f64),
     overlay: bool,
     dirty: bool,
+    bookmarks_dirty: bool,
+    restart_needed: bool,
+    quitting: bool,
 }
 
 impl App {
-    fn active_blank(&self) -> bool {
-        self.tabs.get(self.tabs.active).is_none_or(|t| t.url.is_empty())
+    fn pref(&self, k: &str) -> Value {
+        self.shared.prefs.borrow()[k].clone()
+    }
+    fn pref_on(&self, k: &str) -> bool {
+        self.shared.on(k)
+    }
+    fn pref_str(&self, k: &str) -> String {
+        self.pref(k).as_str().unwrap_or("").to_string()
+    }
+    fn scale(&self) -> f64 {
+        self.pref("ui_scale").as_f64().unwrap_or(100.0).clamp(75.0, 150.0) / 100.0
     }
 
-    fn logical_size(&self) -> (f64, f64) {
-        let s = self.window.inner_size().to_logical::<f64>(self.window.scale_factor());
-        (s.width, s.height)
+    fn active_blank(&self) -> bool {
+        self.tabs.get(self.tabs.active).is_none_or(|t| t.url.is_empty())
     }
 
     fn js(&self, code: &str) {
         let _ = self.ui.evaluate_script(code);
     }
 
-    fn raise_ui(&self) {
+    fn raise(hwnd: windows::Win32::Foundation::HWND) {
         unsafe {
-            let _ = SetWindowPos(self.ui.hwnd(), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            let _ = SetWindowPos(hwnd, Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
     }
 
+    /// The chrome webview fills the window; page webviews sit on top of the content rect the chrome reports.
     fn layout(&mut self) {
-        let (w, h) = self.logical_size();
-        let full = self.overlay || self.active_blank();
-        let ui_h = if full { h } else { self.top };
-        let _ = self.ui.set_bounds(Rect { position: LogicalPosition::new(0.0, 0.0).into(), size: LogicalSize::new(w, ui_h).into() });
+        let s = self.window.inner_size().to_logical::<f64>(self.window.scale_factor());
+        let _ = self.ui.set_bounds(Rect { position: LogicalPosition::new(0.0, 0.0).into(), size: LogicalSize::new(s.width, s.height).into() });
         let visible: Vec<TabId> = if self.active_blank() { vec![] } else { self.tabs.visible() };
         for id in self.shown.clone() {
             if !visible.contains(&id) {
                 self.hide(id);
             }
         }
-        let rects = tile_rects(visible.len(), w, (h - self.top).max(1.0), GAP);
+        let (cx, cy, cw, ch) = self.content;
+        let rects = tile_rects(visible.len(), cw.max(1.0), ch.max(1.0), GAP);
         for (&id, r) in visible.iter().zip(rects) {
             if !self.views.contains_key(&id) && !self.create_view(id) {
                 continue;
             }
             let v = &self.views[&id];
-            let _ = v.set_bounds(Rect { position: LogicalPosition::new(r.0, self.top + r.1).into(), size: LogicalSize::new(r.2, r.3).into() });
+            let _ = v.set_bounds(Rect { position: LogicalPosition::new(cx + r.0, cy + r.1).into(), size: LogicalSize::new(r.2, r.3).into() });
             if self.shown.insert(id) {
                 let _ = v.set_visible(true);
                 let _ = v.set_memory_usage_level(MemoryUsageLevel::Normal);
             }
+            if !self.overlay {
+                Self::raise(v.hwnd());
+            }
         }
-        if full {
-            self.raise_ui();
+        if self.overlay {
+            Self::raise(self.ui.hwnd());
         }
         self.enforce_budget();
     }
@@ -207,7 +349,7 @@ impl App {
         self.shown.remove(&id);
         let Some(v) = self.views.get(&id) else { return };
         let _ = v.set_visible(false);
-        if self.tabs.get(id).is_some_and(|t| t.audible) {
+        if self.tabs.get(id).is_some_and(|t| t.audible) || !self.pref_on("suspend_bg") {
             return;
         }
         let _ = v.set_memory_usage_level(MemoryUsageLevel::Low);
@@ -222,6 +364,7 @@ impl App {
         self.shown.remove(&id);
         self.views.remove(&id); // dropping the WebView closes its renderer
         self.loading.remove(&id);
+        self.shared.doc_scripts.borrow_mut().remove(&id);
         if let Some(t) = self.tabs.get_mut(id) {
             t.loaded = false;
             t.audible = false;
@@ -230,7 +373,10 @@ impl App {
 
     fn enforce_budget(&mut self) {
         let idle = self.profile.idle_minutes * 60;
-        for id in self.tabs.unload_candidates(self.profile.max_live.max(1), idle, now()) {
+        let keep_audible = self.pref_on("keep_audible");
+        let never: Vec<String> = self.pref("never_unload").as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+        let protect = |t: &Tab| (keep_audible && t.audible) || never.iter().any(|h| host(&t.url).ends_with(h.as_str()));
+        for id in self.tabs.unload_candidates(self.profile.max_live.max(1), idle, now(), &protect) {
             self.unload(id);
         }
     }
@@ -242,29 +388,39 @@ impl App {
         }
         let (url, private) = (tab.url.clone(), tab.private);
         let (p1, p2, p3, p4) = (self.proxy.clone(), self.proxy.clone(), self.proxy.clone(), self.proxy.clone());
+        let page_js = PAGE_JS
+            .replace("__GPC__", if self.pref_on("gpc") { "true" } else { "false" })
+            .replace("__LG__", if self.pref_on("gestures") { "true" } else { "false" })
+            .replace("__RK__", if self.pref_on("rocker") { "true" } else { "false" });
         let built = WebViewBuilder::new_with_web_context(&mut self.ctx)
+            .with_additional_browser_args(&self.args)
             .with_url(&url)
             .with_incognito(private)
             .with_visible(false)
             .with_devtools(true)
+            .with_initialization_script(&page_js)
+            .with_ipc_handler(move |req| {
+                let body = req.body();
+                let ev = match body.as_str() {
+                    "F2" => Ev::Key("palette"),
+                    "F6" => Ev::Key("focus"),
+                    b if b.starts_with("g:") && b.len() < 12 => Ev::Gesture(b[2..].to_string()),
+                    b if b.starts_with("c:") => {
+                        let Ok(v) = serde_json::from_str::<Value>(&b[2..]) else { return };
+                        let list = |k: &str| -> Vec<String> {
+                            v[k].as_array().map(|a| a.iter().take(5000).filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default()
+                        };
+                        Ev::Cosmetic(id, list("c"), list("i"))
+                    }
+                    _ => return,
+                };
+                let _ = p4.send_event(ev);
+            })
             .with_document_title_changed_handler(move |t| {
                 let _ = p1.send_event(Ev::Title(id, t));
             })
             .with_on_page_load_handler(move |e, u| {
                 let _ = p2.send_event(Ev::Loaded(id, matches!(e, PageLoadEvent::Finished), u));
-            })
-            // WebView2 does not report bare function keys as accelerators, so pages forward F2/F6 themselves.
-            // Pages can post anything here; only these two names are honoured.
-            .with_initialization_script(
-                "addEventListener('keydown',e=>{if((e.key==='F2'||e.key==='F6')&&!e.ctrlKey&&!e.altKey&&!e.shiftKey){e.preventDefault();window.ipc.postMessage(e.key)}},true)",
-            )
-            .with_ipc_handler(move |req| {
-                let key = match req.body().as_str() {
-                    "F2" => "palette",
-                    "F6" => "focus",
-                    _ => return,
-                };
-                let _ = p4.send_event(Ev::Key(key));
             })
             .with_new_window_req_handler(move |u, _| {
                 let _ = p3.send_event(Ev::NewTab(u));
@@ -282,50 +438,134 @@ impl App {
         true
     }
 
-    /// Native WebView2 hooks: Shields network filter, shortcuts, favicon, audio, focus, URL changes.
+    /// Native WebView2 hooks: Shields, privacy rewrites, shortcuts, favicon, audio, focus, URL changes.
     unsafe fn hook(&self, view: &WebView, id: TabId) -> windows::core::Result<()> {
         let core = view.webview();
         let ctrl = view.controller();
         let env = view.environment();
         let mut tok = Default::default();
 
-        if let Ok(s4) = core.Settings()?.cast::<ICoreWebView2Settings4>() {
-            let _ = s4.SetIsPasswordAutosaveEnabled(true);
-            let _ = s4.SetIsGeneralAutofillEnabled(true);
+        let settings = core.Settings()?;
+        let _ = settings.SetIsScriptEnabled(!self.shared.noscript(&self.tabs.get(id).map(|t| t.url.clone()).unwrap_or_default()));
+        if let Ok(s4) = settings.cast::<ICoreWebView2Settings4>() {
+            let _ = s4.SetIsPasswordAutosaveEnabled(self.pref_on("passwords"));
+            let _ = s4.SetIsGeneralAutofillEnabled(self.pref_on("autofill"));
         }
+        let _ = ctrl.SetZoomFactor(self.pref("zoom").as_f64().unwrap_or(100.0) / 100.0);
+        self.apply_profile(&core);
 
-        core.AddWebResourceRequestedFilter(w!("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?;
-        let (shields, proxy) = (self.shields.clone(), self.proxy.clone());
+        // service workers too, where the runtime supports it
+        match core.cast::<ICoreWebView2_22>() {
+            Ok(c22) => c22.AddWebResourceRequestedFilterWithRequestSourceKinds(
+                w!("*"),
+                COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
+            )?,
+            Err(_) => core.AddWebResourceRequestedFilter(w!("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?,
+        }
+        let (shared, proxy) = (self.shared.clone(), self.proxy.clone());
         core.add_WebResourceRequested(
             &WebResourceRequestedEventHandler::create(Box::new(move |sender, args| {
                 let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
-                let Ok(guard) = shields.try_borrow() else { return Ok(()) };
-                let Some(sh) = guard.as_ref() else { return Ok(()) };
-                let url = pwstr(|p| args.Request()?.Uri(p));
+                let req = args.Request()?;
+                let url = pwstr(|p| req.Uri(p));
                 let page = pwstr(|p| sender.Source(p));
                 let mut ctx = COREWEBVIEW2_WEB_RESOURCE_CONTEXT::default();
                 args.ResourceContext(&mut ctx)?;
-                let kind = match ctx {
-                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT => {
-                        if host(&url) == host(&page) {
-                            return Ok(());
-                        }
-                        "sub_frame"
+                if ctx == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT && host(&url) == host(&page) {
+                    return Ok(()); // the page itself
+                }
+                let verdict = if ctx == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING && shared.on("block_pings") {
+                    Verdict::Block
+                } else {
+                    let Ok(guard) = shared.shields.try_borrow() else { return Ok(()) };
+                    match guard.as_ref() {
+                        Some(sh) => sh.check(&url, &page, resource_kind(ctx)),
+                        None => Verdict::Allow,
                     }
-                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET => "stylesheet",
-                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE => "image",
-                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA => "media",
-                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT => "font",
-                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT => "script",
-                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_XML_HTTP_REQUEST | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH => "xmlhttprequest",
-                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_WEBSOCKET => "websocket",
-                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING => "ping",
-                    _ => "other",
                 };
-                if sh.should_block(&url, &page, kind) {
-                    let resp = env.CreateWebResourceResponse(None, 403, w!("Blocked by Leirk Shields"), w!(""))?;
-                    args.SetResponse(&resp)?;
-                    let _ = proxy.send_event(Ev::Blocked(id));
+                match verdict {
+                    Verdict::Allow => {
+                        if shared.on("gpc") {
+                            let _ = req.Headers()?.SetHeader(w!("Sec-GPC"), w!("1"));
+                        }
+                        return Ok(());
+                    }
+                    Verdict::Redirect(data) => match data_url(&data) {
+                        Some((mime, bytes)) => {
+                            let stream = SHCreateMemStream(Some(&bytes));
+                            let headers = HSTRING::from(format!("Content-Type: {mime}\r\nAccess-Control-Allow-Origin: *"));
+                            let resp = env.CreateWebResourceResponse(stream.as_ref(), 200, w!("OK"), &headers)?;
+                            args.SetResponse(&resp)?;
+                        }
+                        None => args.SetResponse(&env.CreateWebResourceResponse(None, 403, w!("Blocked"), w!(""))?)?,
+                    },
+                    Verdict::Block => args.SetResponse(&env.CreateWebResourceResponse(None, 403, w!("Blocked by Leirk Shields"), w!(""))?)?,
+                }
+                let _ = proxy.send_event(Ev::Blocked(id));
+                Ok(())
+            })),
+            &mut tok,
+        )?;
+
+        // Top-level navigations: query filter, HTTPS upgrade, per-site scripts, scriptlets + site CSS at document start.
+        let (shared, proxy) = (self.shared.clone(), self.proxy.clone());
+        core.add_NavigationStarting(
+            &NavigationStartingEventHandler::create(Box::new(move |sender, args| {
+                let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
+                let uri = pwstr(|p| args.Uri(p));
+                if shared.on("strip_params") {
+                    if let Some(clean) = strip_tracking(&uri) {
+                        args.SetCancel(true)?;
+                        let _ = proxy.send_event(Ev::Navigate(id, clean));
+                        return Ok(());
+                    }
+                }
+                if shared.on("https_upgrade") && !shared.http_only.borrow().contains(host(&uri)) {
+                    if let Some(secure) = https_upgrade(&uri) {
+                        args.SetCancel(true)?;
+                        shared.upgraded.borrow_mut().insert(id, secure.clone());
+                        let _ = proxy.send_event(Ev::Navigate(id, secure));
+                        return Ok(());
+                    }
+                }
+                let _ = sender.Settings()?.SetIsScriptEnabled(!shared.noscript(&uri));
+                if let Some(old) = shared.doc_scripts.borrow_mut().remove(&id) {
+                    let _ = sender.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(old));
+                }
+                let script = shared.shields.try_borrow().ok().and_then(|g| g.as_ref().and_then(|s| s.document_script(&uri)));
+                if let Some(js) = script {
+                    let shared2 = shared.clone();
+                    let _ = sender.AddScriptToExecuteOnDocumentCreated(
+                        &HSTRING::from(js),
+                        &AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |hr, sid| {
+                            if hr.is_ok() {
+                                shared2.doc_scripts.borrow_mut().insert(id, sid);
+                            }
+                            Ok(())
+                        })),
+                    );
+                }
+                Ok(())
+            })),
+            &mut tok,
+        )?;
+
+        // HTTPS upgrade fallback: a site without HTTPS goes back to http and is remembered for the session.
+        let (shared, proxy) = (self.shared.clone(), self.proxy.clone());
+        core.add_NavigationCompleted(
+            &NavigationCompletedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut ok = BOOL::default();
+                args.IsSuccess(&mut ok)?;
+                let mut status = COREWEBVIEW2_WEB_ERROR_STATUS::default();
+                args.WebErrorStatus(&mut status)?;
+                let up = shared.upgraded.borrow_mut().remove(&id);
+                if let Some(secure) = up {
+                    if !ok.as_bool() && status != COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
+                        shared.http_only.borrow_mut().insert(host(&secure).to_string());
+                        let _ = proxy.send_event(Ev::Navigate(id, secure.replacen("https://", "http://", 1)));
+                    }
                 }
                 Ok(())
             })),
@@ -407,6 +647,67 @@ impl App {
         )
     }
 
+    /// Profile-wide settings shared by every webview: tracking prevention and the download folder.
+    unsafe fn apply_profile(&self, core: &ICoreWebView2) {
+        let Ok(profile) = core.cast::<ICoreWebView2_13>().and_then(|c| c.Profile()) else { return };
+        let level = match self.pref_str("tracking").as_str() {
+            "off" => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_NONE,
+            "basic" => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_BASIC,
+            "strict" => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_STRICT,
+            _ => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_BALANCED,
+        };
+        if let Ok(p3) = profile.cast::<ICoreWebView2Profile3>() {
+            let _ = p3.SetPreferredTrackingPreventionLevel(level);
+        }
+        let dl = self.pref_str("download_dir");
+        if !dl.is_empty() && Path::new(&dl).is_dir() {
+            let _ = profile.SetDefaultDownloadFolderPath(&HSTRING::from(dl));
+        }
+    }
+
+    /// Clears browsing data in WebView2's profile (any webview reaches it; the chrome one always exists).
+    fn clear_data(&mut self, since: Option<u64>, kinds: &[&str], done: Option<EventLoopProxy<Ev>>) {
+        if kinds.contains(&"history") {
+            let _ = match since {
+                Some(s) => self.history.clear_since(s as i64),
+                None => self.history.clear(),
+            };
+            self.closed.clear();
+        }
+        let mut mask = COREWEBVIEW2_BROWSING_DATA_KINDS(0);
+        for k in kinds {
+            mask.0 |= match *k {
+                "cookies" => COREWEBVIEW2_BROWSING_DATA_KINDS_ALL_SITE.0,
+                "cache" => COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE.0 | COREWEBVIEW2_BROWSING_DATA_KINDS_CACHE_STORAGE.0,
+                "downloads" => COREWEBVIEW2_BROWSING_DATA_KINDS_DOWNLOAD_HISTORY.0,
+                "autofill" => COREWEBVIEW2_BROWSING_DATA_KINDS_GENERAL_AUTOFILL.0,
+                "passwords" => COREWEBVIEW2_BROWSING_DATA_KINDS_PASSWORD_AUTOSAVE.0,
+                _ => 0,
+            };
+        }
+        let finish = move || {
+            if let Some(p) = &done {
+                let _ = p.send_event(Ev::Quit);
+            }
+        };
+        if mask.0 == 0 {
+            return finish();
+        }
+        unsafe {
+            let Ok(p2) = self.ui.webview().cast::<ICoreWebView2_13>().and_then(|c| c.Profile()).and_then(|p| p.cast::<ICoreWebView2Profile2>()) else {
+                return finish();
+            };
+            let handler = ClearBrowsingDataCompletedHandler::create(Box::new(move |_| {
+                finish();
+                Ok(())
+            }));
+            let _ = match since {
+                Some(s) => p2.ClearBrowsingDataInTimeRange(mask, s as f64, now() as f64 + 60.0, &handler),
+                None => p2.ClearBrowsingData(mask, &handler),
+            };
+        }
+    }
+
     /// Captures the active page as a JPEG so the open sheet can blur it behind itself.
     fn capture_backdrop(&self) {
         let Some(v) = self.views.get(&self.tabs.active) else { return };
@@ -457,21 +758,29 @@ impl App {
             })
             .collect();
         let top_sites = if self.active_blank() { self.history.top(8) } else { vec![] };
+        let off = self.profile.shields_off.contains(&site);
         json!({
             "tabs": tabs, "active": self.tabs.active, "tiled": self.tabs.tiled, "url": url,
             "private": active.is_some_and(|t| t.private), "back": back, "forward": fwd,
             "loading": self.loading.contains(&self.tabs.active),
-            "shields": {"site": site, "on": !self.profile.shields_off.contains(&site),
+            "shields": {"site": site, "on": !off && self.pref_str("shields_level") != "off",
                         "count": self.blocked.get(&self.tabs.active).copied().unwrap_or(0),
-                        "total": self.blocked_total, "ready": self.shields.borrow().is_some()},
+                        "total": self.blocked_total, "ready": self.shared.shields.borrow().is_some(),
+                        "lists": self.lists_loaded, "noscript": self.shared.noscript(&url)},
             "bookmarked": !url.is_empty() && self.profile.bookmarks.iter().any(|b| b.url == url),
             "live": self.views.len(), "topSites": top_sites, "maximized": self.window.is_maximized(),
-            "settings": {"engines": self.profile.engines, "default": self.profile.default_engine,
-                         "maxLive": self.profile.max_live, "idle": self.profile.idle_minutes},
+            "engines": self.profile.engines, "defaultEngine": self.profile.default_engine,
+            "maxLive": self.profile.max_live, "idle": self.profile.idle_minutes,
+            "prefs": *self.shared.prefs.borrow(), "restart": self.restart_needed,
+            "lists": leirk::shields::LISTS.iter().map(|l| l.id).collect::<Vec<_>>(),
         })
     }
 
-    fn push(&self) {
+    fn push(&mut self) {
+        if self.bookmarks_dirty {
+            self.bookmarks_dirty = false;
+            self.js(&format!("L.bookmarks({})", json!(self.profile.bookmarks)));
+        }
         self.js(&format!("L.state({})", self.state()));
     }
 
@@ -486,6 +795,13 @@ impl App {
         self.dirty = false;
     }
 
+    fn reload_shields(&mut self) {
+        self.shields_gen += 1;
+        let prefs = self.shared.prefs.borrow().clone();
+        let custom = prefs["custom_rules"].as_str().unwrap_or("").to_string();
+        load_shields(self.dir.join("lists"), list_urls(&prefs), custom, self.shields_gen, self.proxy.clone());
+    }
+
     fn activate(&mut self, id: TabId) {
         self.tabs.activate(id, now());
         self.dirty = true;
@@ -495,12 +811,25 @@ impl App {
         }
     }
 
-    fn new_tab(&mut self, url: &str, private: bool, after: Option<TabId>) {
+    fn new_tab(&mut self, url: &str, private: bool, background: bool) {
+        let after = (self.pref_str("new_tab_pos") == "right").then_some(self.tabs.active);
         let id = self.tabs.open(url, private, after);
+        if background {
+            return;
+        }
         self.activate(id);
         if url.is_empty() {
             self.push(); // the field must see the blank tab before it takes focus
             self.command("focus", &Value::Null);
+        }
+    }
+
+    fn navigate_tab(&mut self, id: TabId, url: String) {
+        if let Some(t) = self.tabs.get_mut(id) {
+            t.url = url.clone();
+        }
+        if let Some(v) = self.views.get(&id) {
+            let _ = v.load_url(&url);
         }
     }
 
@@ -526,6 +855,9 @@ impl App {
     }
 
     fn close(&mut self, id: TabId) {
+        if self.tabs.list.len() == 1 && self.pref_on("close_last_quits") {
+            return self.quit();
+        }
         if let Some(t) = self.tabs.get(id) {
             if !t.private && !t.url.is_empty() {
                 self.closed.push(t.url.clone());
@@ -533,11 +865,21 @@ impl App {
         }
         self.unload(id);
         self.blocked.remove(&id);
-        self.tabs.close(id);
+        let focus = match self.pref_str("close_activate").as_str() {
+            "left" => CloseFocus::Left,
+            "right" => CloseFocus::Right,
+            _ => CloseFocus::Recent,
+        };
+        self.tabs.close_with(id, focus);
         self.activate(self.tabs.active);
     }
 
     fn cycle(&mut self, step: isize) {
+        if step == 1 && self.pref_on("mru") {
+            if let Some(id) = self.tabs.recent_other() {
+                return self.activate(id);
+            }
+        }
         let n = self.tabs.list.len() as isize;
         let i = self.tabs.list.iter().position(|t| t.id == self.tabs.active).unwrap_or(0) as isize;
         let id = self.tabs.list[(i + step).rem_euclid(n) as usize].id;
@@ -573,10 +915,10 @@ impl App {
             .take(6)
             .collect();
         let hist = self.history.search(q, 8);
-        self.js(&format!("L.results({seq},{})", json!({"bookmarks": marks, "history": hist})));
+        let calc = if self.pref_on("calculator") { calculate(q) } else { None };
+        self.js(&format!("L.results({seq},{})", json!({"bookmarks": marks, "history": hist, "calc": calc})));
     }
 
-    /// Appends to leirk.log: UI script errors and the commands that preceded them.
     fn log(&self, line: &str) {
         use std::io::Write;
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(self.dir.join("leirk.log")) {
@@ -584,30 +926,110 @@ impl App {
         }
     }
 
+    /// Settings with an effect beyond the UI apply here as soon as they change.
+    fn apply_pref(&mut self, k: &str) {
+        match k {
+            "shields_level" | "lists" | "custom_lists" | "custom_rules" => self.reload_shields(),
+            "gestures" | "rocker" => {
+                let js = format!("window.__lg={};window.__rk={};", self.pref_on("gestures"), self.pref_on("rocker"));
+                self.views.values().for_each(|v| drop(v.evaluate_script(&js)));
+            }
+            "zoom" => {
+                let z = self.pref("zoom").as_f64().unwrap_or(100.0) / 100.0;
+                self.views.values().for_each(|v| unsafe { drop(v.controller().SetZoomFactor(z)) });
+            }
+            "tracking" | "download_dir" => unsafe { self.apply_profile(&self.ui.webview()) },
+            "ui_scale" => drop(self.ui.zoom(self.scale())),
+            "autoplay_block" | "gpu" => self.restart_needed = true,
+            "passwords" | "autofill" => {
+                for v in self.views.values() {
+                    unsafe {
+                        if let Ok(s4) = v.webview().Settings().and_then(|s| s.cast::<ICoreWebView2Settings4>()) {
+                            let _ = s4.SetIsPasswordAutosaveEnabled(self.pref_on("passwords"));
+                            let _ = s4.SetIsGeneralAutofillEnabled(self.pref_on("autofill"));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Registers Leirk as a browser for the current user, then opens Windows' default-apps page on it.
+    fn register_default_browser(&self) {
+        let Ok(exe) = std::env::current_exe() else { return };
+        let exe = exe.display().to_string();
+        let cmd = format!("\"{exe}\" \"%1\"");
+        let cap = r"HKCU\Software\Clients\StartMenuInternet\Leirk\Capabilities";
+        let reg: &[&[&str]] = &[
+            &["add", r"HKCU\Software\Classes\LeirkHTML", "/ve", "/d", "Leirk HTML", "/f"],
+            &["add", r"HKCU\Software\Classes\LeirkHTML\shell\open\command", "/ve", "/d", &cmd, "/f"],
+            &["add", r"HKCU\Software\Clients\StartMenuInternet\Leirk", "/ve", "/d", "Leirk", "/f"],
+            &["add", r"HKCU\Software\Clients\StartMenuInternet\Leirk\shell\open\command", "/ve", "/d", &cmd, "/f"],
+            &["add", cap, "/v", "ApplicationName", "/d", "Leirk", "/f"],
+            &["add", cap, "/v", "ApplicationDescription", "/d", "Navigateur léger", "/f"],
+            &["add", &format!(r"{cap}\URLAssociations"), "/v", "http", "/d", "LeirkHTML", "/f"],
+            &["add", &format!(r"{cap}\URLAssociations"), "/v", "https", "/d", "LeirkHTML", "/f"],
+            &["add", &format!(r"{cap}\FileAssociations"), "/v", ".html", "/d", "LeirkHTML", "/f"],
+            &["add", &format!(r"{cap}\FileAssociations"), "/v", ".htm", "/d", "LeirkHTML", "/f"],
+            &["add", r"HKCU\Software\RegisteredApplications", "/v", "Leirk", "/d", r"Software\Clients\StartMenuInternet\Leirk\Capabilities", "/f"],
+        ];
+        use std::os::windows::process::CommandExt;
+        for args in reg {
+            let _ = std::process::Command::new("reg.exe").args(*args).creation_flags(0x0800_0000).status();
+        }
+        let _ = std::process::Command::new("explorer.exe").arg("ms-settings:defaultapps?registeredAppUser=Leirk").spawn();
+    }
+
+    fn quit(&mut self) {
+        self.save();
+        let flags = self.pref("clear_on_exit");
+        let kinds: Vec<&str> = ["history", "cookies", "cache"].into_iter().filter(|k| flags[*k].as_bool().unwrap_or(false)).collect();
+        if kinds.is_empty() || self.quitting {
+            std::process::exit(0);
+        }
+        self.quitting = true;
+        let _ = self.window.set_visible(false);
+        self.clear_data(None, &kinds, Some(self.proxy.clone()));
+    }
+
     fn command(&mut self, c: &str, v: &Value) {
         if c != "query" && c != "layout" {
-            self.log(&format!("cmd {c} {v}"));
+            self.log(&format!("cmd {c} {}", if c == "pref" { v["k"].to_string() } else { v.to_string() }));
         }
         let target = v.as_u64().unwrap_or(self.tabs.active);
         match c {
             "layout" => {
-                self.top = v.as_f64().unwrap_or(80.0);
+                let s = self.scale();
+                let f = |k: &str| v[k].as_f64().unwrap_or(0.0) * s;
+                self.content = (f("x"), f("y"), f("w"), f("h"));
                 self.layout();
+                return;
             }
             "nav" => {
-                let url = resolve(v.as_str().unwrap_or(""), &self.profile.engines, &self.profile.default_engine);
+                let private = self.tabs.get(self.tabs.active).is_some_and(|t| t.private);
+                let engine = if private { self.pref_str("engine_private") } else { self.profile.default_engine.clone() };
+                let url = resolve(v.as_str().unwrap_or(""), &self.profile.engines, &engine);
                 self.navigate(url);
             }
-            "open" => {
+            "open" | "openBg" | "openPrivate" => {
                 let url = v.as_str().unwrap_or("").to_string();
-                if self.active_blank() { self.navigate(url) } else { self.new_tab(&url, false, Some(self.tabs.active)) }
+                if c == "open" && self.active_blank() {
+                    self.navigate(url)
+                } else {
+                    self.new_tab(&url, c == "openPrivate", c == "openBg")
+                }
             }
-            "newtab" => self.new_tab("", false, None),
-            "private" => self.new_tab("", true, None),
+            "newtab" => self.new_tab("", false, false),
+            "private" => self.new_tab("", true, false),
+            "home" => {
+                let home = self.pref_str("home");
+                if home.is_empty() { self.navigate_blank() } else { self.navigate(home) }
+            }
             "close" => self.close(target),
             "reopen" => {
                 if let Some(u) = self.closed.pop() {
-                    self.new_tab(&u, false, None);
+                    self.new_tab(&u, false, false);
                 }
             }
             "activate" => self.activate(target),
@@ -617,6 +1039,7 @@ impl App {
             "forward" => self.with_active(|w| unsafe { w.GoForward() }),
             "reload" => self.with_active(|w| unsafe { w.Reload() }),
             "stop" => self.with_active(|w| unsafe { w.Stop() }),
+            "downloads" => self.with_active(|w| unsafe { w.cast::<ICoreWebView2_9>()?.OpenDefaultDownloadDialog() }),
             "stack" => {
                 if let (Some(a), Some(b)) = (v["id"].as_u64(), v["onto"].as_u64()) {
                     self.tabs.stack(a, b);
@@ -664,15 +1087,25 @@ impl App {
                 if site.is_empty() {
                     return;
                 }
-                if let Some(i) = self.profile.shields_off.iter().position(|s| *s == site) {
-                    self.profile.shields_off.remove(i);
-                } else {
-                    self.profile.shields_off.push(site);
+                match self.profile.shields_off.iter().position(|s| *s == site) {
+                    Some(i) => drop(self.profile.shields_off.remove(i)),
+                    None => self.profile.shields_off.push(site),
                 }
-                if let Some(sh) = self.shields.borrow_mut().as_mut() {
+                if let Some(sh) = self.shared.shields.borrow_mut().as_mut() {
                     sh.disabled_sites = self.profile.shields_off.iter().cloned().collect();
                 }
                 self.blocked.remove(&self.tabs.active);
+                self.with_active(|w| unsafe { w.Reload() });
+            }
+            "noscript" => {
+                let site = host(&self.tabs.get(self.tabs.active).map(|t| t.url.clone()).unwrap_or_default()).to_string();
+                let mut list: Vec<Value> = self.pref("noscript_sites").as_array().cloned().unwrap_or_default();
+                match list.iter().position(|s| *s == site) {
+                    Some(i) => drop(list.remove(i)),
+                    None if !site.is_empty() => list.push(json!(site)),
+                    None => {}
+                }
+                self.set_pref("noscript_sites", json!(list));
                 self.with_active(|w| unsafe { w.Reload() });
             }
             "bookmark" => {
@@ -681,14 +1114,40 @@ impl App {
                     return;
                 }
                 let (url, title) = (t.url.clone(), t.title.clone());
-                match self.profile.bookmarks.iter().position(|b| b.url == url) {
-                    Some(i) => {
-                        self.profile.bookmarks.remove(i);
-                    }
-                    None => self.profile.bookmarks.push(Bookmark { title, url, folder: String::new() }),
+                if !self.profile.bookmarks.iter().any(|b| b.url == url) {
+                    self.profile.bookmarks.push(Bookmark { title, url, folder: String::new() });
+                    self.bookmarks_dirty = true;
                 }
+                self.push();
+                return self.js("L.bookmarkAdded()");
             }
-            "overlay" => self.set_overlay(v.as_bool().unwrap_or(false)),
+            "bmEdit" => {
+                let url = v["url"].as_str().unwrap_or("");
+                if let Some(b) = self.profile.bookmarks.iter_mut().find(|b| b.url == url) {
+                    if let Some(t) = v["title"].as_str() {
+                        b.title = t.to_string();
+                    }
+                    if let Some(f) = v["folder"].as_str() {
+                        b.folder = f.trim_matches('/').to_string();
+                    }
+                }
+                self.bookmarks_dirty = true;
+            }
+            "bmRemove" => {
+                let url = v.as_str().unwrap_or("");
+                self.profile.bookmarks.retain(|b| b.url != url);
+                self.bookmarks_dirty = true;
+            }
+            "bmFolderRemove" => {
+                let f = v.as_str().unwrap_or("").to_string();
+                self.profile.bookmarks.retain(|b| b.folder != f && !b.folder.starts_with(&format!("{f}/")));
+                self.bookmarks_dirty = true;
+            }
+            "toggleBar" => {
+                let next = if self.pref_str("bookmarks_bar") == "always" { "never" } else { "always" };
+                self.set_pref("bookmarks_bar", json!(next));
+            }
+            "overlay" => return self.set_overlay(v.as_bool().unwrap_or(false)),
             "query" => return self.query(v["q"].as_str().unwrap_or(""), v["seq"].as_u64().unwrap_or(0)),
             "drag" => return drop(self.window.drag_window()),
             "resize" => return drop(self.window.drag_resize_window(ResizeDirection::North)),
@@ -716,7 +1175,18 @@ impl App {
                     total.history += r.history;
                     total.engines += r.engines;
                 }
+                self.bookmarks_dirty = true;
                 self.js(&format!("L.imported({})", json!(total)));
+            }
+            "pref" => {
+                let Some(k) = v["k"].as_str() else { return };
+                self.set_pref(k, v["v"].clone());
+            }
+            "resetPrefs" => {
+                self.profile.prefs = json!({});
+                *self.shared.prefs.borrow_mut() = merged_prefs(&self.profile.prefs);
+                let _ = self.ui.zoom(self.scale());
+                self.reload_shields();
             }
             "setting" => {
                 match v["k"].as_str() {
@@ -727,13 +1197,40 @@ impl App {
                 }
                 self.enforce_budget();
             }
+            "engineAdd" => {
+                let e: Option<Engine> = serde_json::from_value(v.clone()).ok();
+                if let Some(e) = e.filter(|e| e.url.contains("%s") && !e.keyword.is_empty()) {
+                    self.profile.engines.retain(|x| !x.keyword.eq_ignore_ascii_case(&e.keyword));
+                    self.profile.engines.push(e);
+                }
+            }
+            "engineRemove" => {
+                let k = v.as_str().unwrap_or("");
+                if k != self.profile.default_engine {
+                    self.profile.engines.retain(|e| e.keyword != k);
+                }
+            }
+            "clearData" => {
+                let since = v["since"].as_u64().filter(|&s| s > 0).map(|s| now().saturating_sub(s));
+                let kinds: Vec<String> = v["kinds"].as_array().map(|a| a.iter().filter_map(|k| k.as_str().map(String::from)).collect()).unwrap_or_default();
+                let kinds: Vec<&str> = kinds.iter().map(String::as_str).collect();
+                self.clear_data(since, &kinds, None);
+            }
             "clearHistory" => {
                 let _ = self.history.clear();
             }
-            "quit" => {
-                self.save();
-                std::process::exit(0);
+            "defaultBrowser" => self.register_default_browser(),
+            "openFolder" => {
+                let dir = match v.as_str() {
+                    Some("downloads") => {
+                        let d = self.pref_str("download_dir");
+                        if d.is_empty() { std::env::var("USERPROFILE").map(|p| format!("{p}\\Downloads")).unwrap_or_default() } else { d }
+                    }
+                    _ => self.dir.display().to_string(),
+                };
+                let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
             }
+            "quit" => return self.quit(),
             k if k.starts_with("tab") => {
                 let n: usize = k[3..].parse().unwrap_or(1);
                 let last = self.tabs.list.len() - 1;
@@ -750,7 +1247,32 @@ impl App {
             _ => return,
         }
         self.dirty = true;
+        // user data is written at once: an import or a new bookmark must survive a crash
+        if matches!(c, "import" | "bookmark" | "bmEdit" | "bmRemove" | "bmFolderRemove" | "pref" | "setting" | "engineAdd" | "engineRemove" | "resetPrefs") {
+            self.save();
+        }
         self.push();
+    }
+
+    fn navigate_blank(&mut self) {
+        if let Some(t) = self.tabs.get_mut(self.tabs.active) {
+            t.url.clear();
+            t.title.clear();
+        }
+        let id = self.tabs.active;
+        self.unload(id);
+        self.layout();
+        self.command("focus", &Value::Null);
+    }
+
+    fn set_pref(&mut self, k: &str, v: Value) {
+        if !self.profile.prefs.is_object() {
+            self.profile.prefs = json!({});
+        }
+        self.profile.prefs[k] = v;
+        *self.shared.prefs.borrow_mut() = merged_prefs(&self.profile.prefs);
+        self.apply_pref(k);
+        self.dirty = true;
     }
 
     fn event(&mut self, ev: Ev) {
@@ -763,6 +1285,25 @@ impl App {
                 return;
             }
             Ev::Key(k) => return self.command(k, &Value::Null),
+            Ev::Gesture(path) => {
+                let rocker = path == "B" || path == "F";
+                let on = if rocker { self.pref_on("rocker") } else { self.pref_on("gestures") };
+                if let (true, Some(cmd)) = (on, gesture(&path)) {
+                    self.command(cmd, &Value::Null);
+                }
+                return;
+            }
+            Ev::Navigate(id, url) => return self.navigate_tab(id, url),
+            Ev::Quit => std::process::exit(0),
+            Ev::Cosmetic(id, classes, ids) => {
+                let (Some(v), Some(t)) = (self.views.get(&id), self.tabs.get(id)) else { return };
+                let sels = self.shared.shields.borrow().as_ref().map(|s| s.generic_selectors(&t.url, &classes, &ids)).unwrap_or_default();
+                if !sels.is_empty() {
+                    let css = format!("{}{{display:none!important}}", sels.join(","));
+                    let _ = v.evaluate_script(&format!("window.__leirkHide&&window.__leirkHide({})", json!(css)));
+                }
+                return;
+            }
             Ev::Title(id, title) => {
                 let Some(t) = self.tabs.get_mut(id) else { return };
                 t.title = title.clone();
@@ -790,12 +1331,12 @@ impl App {
                 } else {
                     self.loading.insert(id);
                     self.blocked.remove(&id);
-                    self.cosmetic(id, &url);
                 }
             }
             Ev::NewTab(url) => {
                 let private = self.tabs.get(self.tabs.active).is_some_and(|t| t.private);
-                self.new_tab(&url, private, Some(self.tabs.active));
+                let bg = self.pref_on("links_bg");
+                self.new_tab(&url, private, bg);
             }
             Ev::Blocked(id) => {
                 *self.blocked.entry(id).or_default() += 1;
@@ -821,34 +1362,37 @@ impl App {
                 self.tabs.activate(id, now());
             }
             Ev::Backdrop(data) => return self.js(&format!("L.backdrop('data:image/jpeg;base64,{data}')")),
-            Ev::ShieldsReady(mut sh) => {
+            Ev::ShieldsReady(mut sh, generation, loaded) => {
+                if generation != self.shields_gen {
+                    return; // a newer list selection is already loading
+                }
                 sh.disabled_sites = self.profile.shields_off.iter().cloned().collect();
-                *self.shields.borrow_mut() = Some(sh);
+                *self.shared.shields.borrow_mut() = Some(sh);
+                self.lists_loaded = loaded;
             }
         }
         self.push();
-    }
-
-    /// Cosmetic filtering: hide site-specific ad containers as the document starts.
-    fn cosmetic(&self, id: TabId, url: &str) {
-        let Some(v) = self.views.get(&id) else { return };
-        let guard = self.shields.borrow();
-        let Some(sh) = guard.as_ref() else { return };
-        let sel = sh.hide_selectors(url);
-        if sel.is_empty() {
-            return;
-        }
-        let css = format!("{}{{display:none!important}}", sel.join(","));
-        let _ = v.evaluate_script(&format!(
-            "(()=>{{const s=document.createElement('style');s.textContent={};(document.head||document.documentElement).appendChild(s)}})()",
-            json!(css)
-        ));
     }
 }
 
 fn main() {
     let dir = store::data_dir();
     let _ = std::fs::create_dir_all(&dir);
+    let mut profile: Profile = store::load_json(&dir.join("profile.json"));
+    let prefs = merged_prefs(&profile.prefs);
+    if !profile.prefs.is_object() {
+        profile.prefs = json!({});
+    }
+
+    // Engine switches are fixed for the process lifetime; changing them asks for a restart.
+    let mut args = WRY_ARGS.to_string();
+    if prefs["autoplay_block"].as_bool().unwrap_or(true) {
+        args += " --autoplay-policy=document-user-activation-required";
+    }
+    if !prefs["gpu"].as_bool().unwrap_or(true) {
+        args += " --disable-gpu --disable-gpu-compositing";
+    }
+
     let event_loop = EventLoopBuilder::<Ev>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     let window = WindowBuilder::new()
@@ -863,6 +1407,7 @@ fn main() {
     let mut ctx = WebContext::new(Some(dir.join("WebView2")));
     let p = proxy.clone();
     let ui = WebViewBuilder::new_with_web_context(&mut ctx)
+        .with_additional_browser_args(&args)
         .with_html(include_str!("../ui/index.html"))
         .with_ipc_handler(move |req| {
             let _ = p.send_event(Ev::Ui(req.into_body()));
@@ -872,6 +1417,19 @@ fn main() {
         .expect("chrome webview");
 
     let mut tabs: Tabs = store::load_json(&dir.join("session.json"));
+    match prefs["startup"].as_str() {
+        Some("ntp") => tabs = Tabs::default(),
+        Some("pages") => {
+            tabs = Tabs::default();
+            for u in prefs["startup_pages"].as_str().unwrap_or("").lines().map(str::trim).filter(|u| !u.is_empty()) {
+                tabs.open(&resolve(u, &profile.engines, &profile.default_engine), false, None);
+            }
+            if let Some(t) = tabs.list.first() {
+                tabs.active = t.id;
+            }
+        }
+        _ => {}
+    }
     if let Some(arg) = std::env::args().nth(1) {
         let url = if Path::new(&arg).exists() { format!("file:///{}", arg.replace('\\', "/")) } else { arg };
         tabs.active = tabs.open(&url, false, None);
@@ -889,28 +1447,42 @@ fn main() {
         window,
         ui,
         ctx,
+        args,
         proxy: proxy.clone(),
         dir: dir.clone(),
         tabs,
         views: HashMap::new(),
         shown: HashSet::new(),
-        profile: store::load_json(&dir.join("profile.json")),
+        profile,
         history,
-        shields: Rc::new(RefCell::new(None)),
+        shared: Rc::new(Shared {
+            prefs: RefCell::new(prefs),
+            shields: RefCell::new(None),
+            doc_scripts: RefCell::new(HashMap::new()),
+            upgraded: RefCell::new(HashMap::new()),
+            http_only: RefCell::new(HashSet::new()),
+        }),
+        shields_gen: 0,
+        lists_loaded: 0,
         blocked: HashMap::new(),
         blocked_total: stats["blocked"].as_u64().unwrap_or(0),
         closed: vec![],
         loading: HashSet::new(),
-        top: 80.0,
+        content: (0.0, 120.0, 1280.0, 700.0),
         overlay: false,
         dirty: false,
+        bookmarks_dirty: true,
+        restart_needed: false,
+        quitting: false,
     };
     unsafe {
         let _ = app.hook_keys(&app.ui.controller());
+        app.apply_profile(&app.ui.webview());
     }
+    let _ = app.ui.zoom(app.scale());
     app.tabs.activate(app.tabs.active, now());
     let _ = app.ui.focus();
-    load_shields(dir.join("lists"), proxy);
+    app.reload_shields();
 
     event_loop.run(move |event, _, flow| match event {
         Event::NewEvents(StartCause::Init) => {
@@ -919,6 +1491,9 @@ fn main() {
         }
         Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
             *flow = ControlFlow::WaitUntil(Instant::now() + TICK);
+            if app.quitting {
+                std::process::exit(0); // clearing data took too long; leave anyway
+            }
             app.enforce_budget();
             if app.dirty {
                 app.save();
@@ -930,10 +1505,7 @@ fn main() {
             app.layout();
             app.push();
         }
-        Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-            app.save();
-            *flow = ControlFlow::Exit;
-        }
+        Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => app.quit(),
         _ => {}
     });
 }
@@ -943,19 +1515,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn base64_matches_rfc4648() {
+    fn base64_round_trip() {
         assert_eq!(b64(b""), "");
         assert_eq!(b64(b"f"), "Zg==");
         assert_eq!(b64(b"fo"), "Zm8=");
         assert_eq!(b64(b"foobar"), "Zm9vYmFy");
+        for s in [&b""[..], b"f", b"fo", b"foo", b"(function(){})();"] {
+            assert_eq!(unb64(&b64(s)).as_deref(), Some(s));
+        }
+        assert_eq!(unb64("**"), None);
+    }
+
+    #[test]
+    fn data_urls_from_redirects() {
+        let (mime, bytes) = data_url("data:application/javascript;base64,KGZ1bmN0aW9uKCl7fSkoKTs=").unwrap();
+        assert_eq!(mime, "application/javascript");
+        assert_eq!(bytes, b"(function(){})();");
+        assert_eq!(data_url("data:text/plain,hello"), None);
+        assert_eq!(data_url("https://x"), None);
     }
 
     #[test]
     fn shortcuts() {
         assert_eq!(shortcut('T' as u32, true, false, false), Some("newtab"));
         assert_eq!(shortcut('T' as u32, true, true, false), Some("reopen"));
+        assert_eq!(shortcut('B' as u32, true, true, false), Some("toggleBar"));
         assert_eq!(shortcut('3' as u32, true, false, false), Some("tab3"));
         assert_eq!(shortcut(0x71, false, false, false), Some("palette"));
         assert_eq!(shortcut('T' as u32, false, false, false), None);
+    }
+
+    #[test]
+    fn gestures_follow_vivaldi_defaults() {
+        assert_eq!(gesture("L"), Some("back"));
+        assert_eq!(gesture("B"), Some("back"));
+        assert_eq!(gesture("DR"), Some("close"));
+        assert_eq!(gesture("UD"), Some("reload"));
+        assert_eq!(gesture("RLRL"), None);
+    }
+
+    #[test]
+    fn list_cache_names_are_file_safe() {
+        let n = cache_name("https://raw.githubusercontent.com/a/b/filters-2024.txt?x=1");
+        assert!(n.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_'), "{n}");
+        assert!(n.len() <= 120);
     }
 }

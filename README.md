@@ -35,14 +35,28 @@ Sur des sites lourds, l'essentiel restant est le processus GPU de WebView2. Les 
 ## Fonctionnalités
 
 **Brave**
-- Shields : moteur `adblock-rust` de Brave, avec EasyList, EasyPrivacy, uBlock filters et privacy, et Liste FR. Les listes sont rafraîchies tous les 4 jours. Blocage réseau et masquage cosmétique par site, compteur par page et total, désactivation par site.
-- Onglets privés (InPrivate, Ctrl+Maj+N) : toute l'interface passe en indigo, rien n'est écrit sur le disque.
-- Disposition de Brave : onglets au-dessus, Shields à droite de l'adresse, menu ☰.
+- Shields : le moteur `adblock-rust` de Brave avec son catalogue de listes, soit 30 listes par défaut : uBlock Origin 2020→2026, badware, quick-fixes, unbreak, EasyList, EasyPrivacy, URLhaus, listes Brave, bannières de cookies et AdGuard Français. Il gère aussi :
+  - les **scriptlets** et les **redirections neutres** issus des ressources Brave ;
+  - le masquage **générique** (classes et identifiants) et le masquage propre à chaque site, injecté dès la création du document ;
+  - les service workers.
+
+  Trois niveaux : Standard, Agressif (avec AdGuard Base, Tracking et URL Tracking) ou Désactivé. On peut ajouter des listes et des filtres personnels. Score sur adblock-tester.com : **100/100**.
+- Par site : interrupteur Shields et blocage du JavaScript.
+- Passage en HTTPS (retour en HTTP si le site n'a pas de version sécurisée), retrait des paramètres de pistage (utm, fbclid, gclid…), Global Privacy Control, blocage des pings, protection anti-pistage du moteur (4 niveaux).
+- Onglets privés (InPrivate, Ctrl+Maj+N) avec un moteur de recherche à part.
+- Effacement des données (période et types au choix) et effacement automatique à la fermeture.
 
 **Vivaldi**
-- Piles d'onglets : glisser un onglet au centre d'un autre, ou clic droit. La pile active affiche une seconde rangée.
-- Mosaïque de 2 à 4 onglets : Ctrl+clic pour sélectionner, puis le bouton « Mosaïque », ou clic droit, ou la pile en mosaïque.
-- Commandes rapides (F2 / Ctrl+K) : onglets, signets, historique et actions dans le même champ, recherche sans accents.
+- Piles d'onglets, mosaïque de 2 à 4 onglets, commandes rapides (F2 / Ctrl+K) avec calculatrice.
+- Gestes souris (← → ↓ ↓→ ↑↓ ↓←) et gestes à bascule.
+- Options d'onglets : position des nouveaux onglets, onglet activé à la fermeture, ouverture des liens en arrière-plan, Ctrl+Tab dans l'ordre d'utilisation, double-clic pour fermer, molette pour changer d'onglet, atténuation des onglets déchargés.
+
+**Interface**
+- Barre de favoris : toujours, sur les nouveaux onglets seulement, ou jamais (Ctrl+Maj+B). Elle gère les dossiers, le débordement », le clic droit (ouvrir, arrière-plan, privé, modifier, supprimer) et le clic molette.
+- Fenêtre de modification d'un favori (nom et dossier).
+- Onglets en haut ou verticaux à gauche ; thème système, clair ou sombre ; 6 couleurs d'accent ; densité compacte ; taille de l'interface de 80 à 130 % ; bouton Accueil.
+- Réglages en 12 sections avec recherche.
+- Démarrage : reprendre la session, un nouvel onglet ou des pages précises. Zoom par défaut, dossier de téléchargement, Leirk comme navigateur par défaut.
 
 **Recherche et import**
 - 28 moteurs intégrés, plus ceux importés des navigateurs Chromium. On choisit un moteur ponctuellement avec un mot-clé ou un bang : `g chats`, `!yt lofi`, `w Rust`, `gpt …`.

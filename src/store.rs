@@ -178,6 +178,11 @@ impl History {
         self.search("", limit)
     }
 
+    /// Forgets visits made at or after `since` (unix seconds).
+    pub fn clear_since(&self, since: i64) -> rusqlite::Result<()> {
+        self.db.execute("DELETE FROM h WHERE last >= ?1", params![since]).map(|_| ())
+    }
+
     pub fn clear(&self) -> rusqlite::Result<()> {
         self.db.execute("DELETE FROM h", []).map(|_| ())
     }
