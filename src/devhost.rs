@@ -1,4 +1,4 @@
-//! Developer mode (Docker, ports, network, JS errors, technologies, performance, storage, responsive),
+//! Developer mode (Docker, local web servers, technologies, JS error badges, captures),
 //! per-tab memory for hover cards, and full-page capture. Everything here is off unless the user enables it.
 use super::*;
 use leirk::devtools::{parse_docker, parse_ports, speaks_http};
@@ -406,7 +406,6 @@ impl App {
     /// Developer-mode commands from the chrome; returns false for anything else.
     pub(crate) fn dev_command(&mut self, c: &str, v: &Value) -> bool {
         let proxy = self.proxy.clone();
-        let core = self.active_core();
         match c {
             "devDocker" => {
                 std::thread::spawn(move || {
@@ -457,18 +456,6 @@ impl App {
                 });
             }
             "devTech" => self.tech_detect(),
-            "devDevice" => {
-                if let Some(core) = core {
-                    if v.is_null() {
-                        cdp(&core, "Emulation.clearDeviceMetricsOverride", json!({}), |_| {});
-                        cdp(&core, "Emulation.setTouchEmulationEnabled", json!({"enabled": false}), |_| {});
-                    } else {
-                        let mobile = v["mobile"].as_bool().unwrap_or(false);
-                        cdp(&core, "Emulation.setDeviceMetricsOverride", json!({"width": v["w"], "height": v["h"], "deviceScaleFactor": v["dpr"], "mobile": mobile}), |_| {});
-                        cdp(&core, "Emulation.setTouchEmulationEnabled", json!({"enabled": mobile, "maxTouchPoints": 5}), |_| {});
-                    }
-                }
-            }
             "devErrorsWatch" => {
                 for (id, view) in &self.views {
                     self.watch_errors(&view.webview(), *id);

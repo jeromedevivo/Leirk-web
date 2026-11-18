@@ -37,12 +37,6 @@ tr.bad td:first-child { color: var(--bad); font-weight: 600; }
 .good b { color: var(--ok); } .mid b { color: var(--warn); } .bad b { color: var(--bad); }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .err { padding: 6px 0; border-bottom: 1px solid var(--line); font-family: Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
-.btn.ic { display: grid; place-items: center; padding: 4px 6px; color: var(--mut); }
-.btn.ic[aria-pressed="true"] { color: var(--acc); }
-.sep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
-#devbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--field); }
-#devbar input { width: 64px; }
-#devbar select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 3px; }
 details.stack { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 8px; }
 details.stack > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 8px; cursor: pointer; }
 details.stack > summary::-webkit-details-marker { display: none; }

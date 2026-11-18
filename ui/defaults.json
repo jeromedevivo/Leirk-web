@@ -73,7 +73,6 @@
     "ports": true,
     "perf": true,
     "storage": true,
-    "responsive": true,
     "tools": true,
     "containers": true
   },

@@ -34,6 +34,7 @@ use wry::{
 };
 
 mod devapi;
+mod inspector;
 mod devhost;
 mod panels;
 mod synchost;
@@ -66,6 +67,12 @@ enum Ev {
     DevApi(String, Value, String, std::sync::mpsc::Sender<Value>),
     /// A page announced which DevTools nonce inspects it.
     DevHello(String, TabId),
+    /// DevTools target id of a tab, ready to dock the front end on it.
+    Inspect(TabId, String),
+    /// A call from the docked DevTools front end.
+    InspectorHost(String),
+    /// Time to collect the docked front end's queued calls.
+    InspectorPoll,
 }
 
 const TICK: Duration = Duration::from_secs(30);
@@ -102,6 +109,8 @@ fn shortcut(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'static str>
         (false, false, true, 0x24) => "home", // Alt+Home
         (false, false, false, 0x71) => "palette", // F2, as in Vivaldi
         (false, false, false, 0x75) => "focus",   // F6
+        (false, false, false, 0x7B) => "devtools", // F12, docked as in Chrome and Brave
+        (true, true, false, _) if key == 'I' || key == 'J' || key == 'C' => "devtools",
         _ => return None,
     })
 }
@@ -133,6 +142,11 @@ fn app_icon() -> Option<tao::window::Icon> {
 }
 
 /// Only web addresses may come from web content or sync files (no file:, javascript:, data: documents).
+/// A loopback port nobody is listening on right now.
+fn free_port() -> Option<u16> {
+    std::net::TcpListener::bind(("127.0.0.1", 0)).ok()?.local_addr().ok().map(|a| a.port())
+}
+
 pub(crate) fn is_web_url(u: &str) -> bool {
     let l = u.trim_start().to_ascii_lowercase();
     l.starts_with("https://") || l.starts_with("http://")
@@ -343,6 +357,9 @@ struct App {
     dev_nonces: HashMap<String, TabId>,
     /// Developer results waiting for the DevTools tab to collect them.
     outbox: Vec<Value>,
+    /// Loopback debugging port (developer mode only) and the docked DevTools front end.
+    debug_port: Option<u16>,
+    inspector: Option<inspector::Inspector>,
 }
 
 impl App {
@@ -383,14 +400,16 @@ impl App {
                 self.hide(id);
             }
         }
+        self.park_inspector(&visible);
         let (cx, cy, cw, ch) = self.content;
         let rects = tile_rects(visible.len(), cw.max(1.0), ch.max(1.0), GAP);
         for (&id, r) in visible.iter().zip(rects) {
             if !self.views.contains_key(&id) && !self.create_view(id) {
                 continue;
             }
+            let r = self.layout_inspector(id, (cx + r.0, cy + r.1, r.2, r.3));
             let v = &self.views[&id];
-            let _ = v.set_bounds(Rect { position: LogicalPosition::new(cx + r.0, cy + r.1).into(), size: LogicalSize::new(r.2, r.3).into() });
+            let _ = v.set_bounds(Rect { position: LogicalPosition::new(r.0, r.1).into(), size: LogicalSize::new(r.2, r.3).into() });
             if self.shown.insert(id) {
                 let _ = v.set_visible(true);
                 let _ = v.set_memory_usage_level(MemoryUsageLevel::Normal);
@@ -1028,7 +1047,7 @@ impl App {
             }
             "tracking" | "download_dir" => unsafe { self.apply_profile(&self.ui.webview()) },
             "ui_scale" => drop(self.ui.zoom(self.scale())),
-            "autoplay_block" | "gpu" => self.restart_needed = true,
+            "autoplay_block" | "gpu" | "dev_mode" => self.restart_needed = true,
             "passwords" | "autofill" => {
                 for v in self.views.values() {
                     unsafe {
@@ -1268,11 +1287,7 @@ impl App {
             "resize" => return drop(self.window.drag_resize_window(ResizeDirection::North)),
             "min" => return self.window.set_minimized(true),
             "max" => self.window.set_maximized(!self.window.is_maximized()),
-            "devtools" => {
-                if let Some(v) = self.views.get(&self.tabs.active) {
-                    v.open_devtools();
-                }
-            }
+            "devtools" => self.toggle_inspector(),
             "imports" => {
                 let list: Vec<Value> = import::sources().iter().map(|s| json!({"name": s.name})).collect();
                 return self.js(&format!("L.imports({})", Value::Array(list)));
@@ -1421,6 +1436,9 @@ impl App {
                 return;
             }
             Ev::Navigate(id, url) => return self.navigate_tab(id, url),
+            Ev::Inspect(id, target) => return self.open_inspector(id, target),
+            Ev::InspectorHost(body) => return self.inspector_host(&body),
+            Ev::InspectorPoll => return self.poll_inspector(),
             Ev::DevHello(nonce, id) => {
                 if self.dev_nonces.len() >= 64 {
                     self.dev_nonces.clear();
@@ -1608,6 +1626,12 @@ fn main() {
     if prefs["autoplay_block"].as_bool().unwrap_or(true) {
         args += " --autoplay-policy=document-user-activation-required";
     }
+    // Developer mode hosts Chromium's own DevTools front end (device mode, dock side) inside the window;
+    // it talks to the page over a loopback debugging port that only exists while developer mode is on.
+    let debug_port = prefs["dev_mode"].as_bool().unwrap_or(false).then(free_port).flatten();
+    if let Some(p) = debug_port {
+        args += &format!(" --remote-debugging-port={p} --remote-allow-origins=devtools://devtools");
+    }
     if !prefs["gpu"].as_bool().unwrap_or(true) {
         args += " --disable-gpu --disable-gpu-compositing";
     }
@@ -1725,6 +1749,8 @@ fn main() {
         dev_target: None,
         dev_nonces: HashMap::new(),
         outbox: vec![],
+        debug_port,
+        inspector: None,
     };
     unsafe {
         let _ = app.hook_keys(&app.ui.controller());
@@ -1804,6 +1830,8 @@ mod tests {
         assert_eq!(shortcut('B' as u32, true, true, false), Some("toggleBar"));
         assert_eq!(shortcut('3' as u32, true, false, false), Some("tab3"));
         assert_eq!(shortcut(0x71, false, false, false), Some("palette"));
+        assert_eq!(shortcut(0x7B, false, false, false), Some("devtools"), "F12 docks DevTools instead of WebView2's own window");
+        assert_eq!(shortcut('I' as u32, true, true, false), Some("devtools"));
         assert_eq!(shortcut('T' as u32, false, false, false), None);
     }
 

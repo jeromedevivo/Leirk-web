@@ -17,27 +17,6 @@ const EVERY = { docker: 5000, ports: 8000 };
 let state = { dev: false, modules: {} }, data = {}, tab = "tech", logsFor = "", lastAsk = 0;
 const openStacks = new Set();
 
-// Responsive: Chromium's device mode is missing from WebView2's DevTools, so Leirk emulates the screen itself.
-const DEVICES = [["iPhone 15", 393, 852, 3, true], ["iPhone SE", 375, 667, 2, true], ["Pixel 8", 412, 915, 2.6, true], ["Galaxy S24", 360, 780, 3, true], ["iPad Air", 820, 1180, 2, true], ["Portable", 1366, 768, 1, false], ["Bureau", 1920, 1080, 1, false]];
-let device = null; // {w, h, dpr, mobile, name}
-function setDevice(d) {
-  device = d;
-  $("#device").setAttribute("aria-pressed", String(!!d));
-  const bar = $("#devbar");
-  bar.hidden = !d;
-  if (d) bar.innerHTML = `<select id="dvSel" aria-label="Appareil">${DEVICES.map(([n, w, h]) => `<option ${n === d.name ? "selected" : ""}>${n}</option>`).join("")}<option ${d.name ? "" : "selected"} value="">Personnalisé</option></select>
-    <input id="dvW" type="number" min="200" max="3840" value="${d.w}" aria-label="Largeur"> × <input id="dvH" type="number" min="200" max="3840" value="${d.h}" aria-label="Hauteur">
-    <button class="btn" id="dvRot" title="Pivoter">⟳ Pivoter</button><span class="muted">${d.mobile ? "tactile · " : ""}DPR ${d.dpr}</span>`;
-  api("devDevice", d ? { w: d.w, h: d.h, dpr: d.dpr, mobile: d.mobile } : null);
-}
-const preset = name => { const [n, w, h, dpr, mobile] = DEVICES.find(x => x[0] === name) || DEVICES[0]; return { name: n, w, h, dpr, mobile }; };
-$("#device").onclick = () => setDevice(device ? null : preset("iPhone 15"));
-$("#devbar").addEventListener("change", e => {
-  if (e.target.id === "dvSel") return e.target.value && setDevice(preset(e.target.value));
-  const w = +$("#dvW").value, h = +$("#dvH").value;
-  if (w >= 200 && h >= 200) setDevice({ ...device, name: "", w, h });
-});
-$("#devbar").addEventListener("click", e => { if (e.target.id === "dvRot") setDevice({ ...device, w: device.h, h: device.w }); });
 document.addEventListener("toggle", e => { const p = e.target.dataset?.stack; if (p != null) e.target.open ? openStacks.add(p) : openStacks.delete(p); }, true);
 
 async function api(c, v) {
@@ -62,7 +41,6 @@ async function loop() {
 function render() {
   const js = $("#js");
   js.hidden = !state.dev || state.modules?.js === false;
-  $("#device").hidden = !state.dev || state.modules?.responsive === false;
   js.classList.toggle("off", !!state.noscript);
   if (state.offline) return void ($("#body").innerHTML = `<p class="muted">Leirk ne répond pas. Fermez puis rouvrez les DevTools.</p>`);
   if (!state.dev) { $("#nav").innerHTML = ""; return void ($("#body").innerHTML = `<p class="muted">Le mode développeur est désactivé. Activez-le dans Leirk › Réglages › Mode développeur.</p>`); }
@@ -167,5 +145,3 @@ document.addEventListener("click", e => {
 $("#js").onclick = () => api("devJs");
 loop();
 refresh();
-// closing DevTools must not leave the page stuck at phone size
-addEventListener("pagehide", () => { if (device) api("devDevice", null); });
