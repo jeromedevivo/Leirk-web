@@ -3,6 +3,14 @@ use serde::{Deserialize, Serialize};
 
 pub type TabId = u64;
 
+/// Which tab takes over when the active one closes (Vivaldi's `tabs.activation.on_close`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum CloseFocus {
+    Recent,
+    Right,
+    Left,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Tab {
     pub id: TabId,
@@ -77,6 +85,16 @@ impl Tabs {
         }
     }
 
+    /// Closes a tab, activating per `focus`. Keeps at least one tab open.
+    pub fn close_with(&mut self, id: TabId, focus: CloseFocus) {
+        todo!()
+    }
+
+    /// Most recently used tab other than the active one (Ctrl+Tab in recent order).
+    pub fn recent_other(&self) -> Option<TabId> {
+        todo!()
+    }
+
     /// Closes a tab. Keeps at least one tab open and picks the right neighbour as new active.
     pub fn close(&mut self, id: TabId) {
         let Some(i) = self.index(id) else { return };
@@ -137,11 +155,11 @@ impl Tabs {
     }
 
     /// Loaded tabs to unload: idle longer than `idle_secs`, or the least recently used beyond `max_live`.
-    /// Visible and audible tabs are never unloaded.
-    pub fn unload_candidates(&self, max_live: usize, idle_secs: u64, now: u64) -> Vec<TabId> {
+    /// Visible tabs and those `protect` accepts (audible, exempted sites) are never unloaded.
+    pub fn unload_candidates(&self, max_live: usize, idle_secs: u64, now: u64, protect: &dyn Fn(&Tab) -> bool) -> Vec<TabId> {
         let visible = self.visible();
         let mut live: Vec<&Tab> = self.list.iter().filter(|t| t.loaded).collect();
-        let keep = |t: &Tab| visible.contains(&t.id) || t.audible;
+        let keep = |t: &Tab| visible.contains(&t.id) || protect(t);
         // most recent first: everything past max_live (or idle) goes
         live.sort_by(|a, b| b.last_active.cmp(&a.last_active));
         let mut kept = live.iter().filter(|t| keep(t)).count();
@@ -261,14 +279,39 @@ mod tests {
         }
         // active = ids[5]; ids[0] is audible
         t.get_mut(ids[0]).unwrap().audible = true;
-        let mut got = t.unload_candidates(3, 10_000, 1010);
+        let audible = |t: &Tab| t.audible;
+        let mut got = t.unload_candidates(3, 10_000, 1010, &audible);
         got.sort();
         // 6 loaded, max 3 -> unload 3 oldest non-visible non-audible: ids 1,2,3
         assert_eq!(got, vec![ids[1], ids[2], ids[3]]);
         // idle: everything older than 5s except visible/audible
-        let mut got = t.unload_candidates(10, 5, 1009);
+        let mut got = t.unload_candidates(10, 5, 1009, &audible);
         got.sort();
         assert_eq!(got, vec![ids[1], ids[2], ids[3]]);
+        // an exempted site is protected like an audible tab
+        let site = |t: &Tab| t.audible || t.url.contains("://1.");
+        let mut got = t.unload_candidates(3, 10_000, 1010, &site);
+        got.sort();
+        assert_eq!(got, vec![ids[2], ids[3]]);
+    }
+
+    #[test]
+    fn close_focus_modes_and_recent_order() {
+        let mut t = three();
+        let [a, b, c] = [t.list[0].id, t.list[1].id, t.list[2].id];
+        t.activate(c, 5);
+        t.activate(a, 6);
+        t.activate(b, 7);
+        assert_eq!(t.recent_other(), Some(a));
+        t.close_with(b, CloseFocus::Recent);
+        assert_eq!(t.active, a, "most recently used wins");
+        t.activate(c, 8);
+        t.close_with(c, CloseFocus::Left);
+        assert_eq!(t.active, a);
+        let mut u = three();
+        let first = u.list[0].id;
+        u.close_with(first, CloseFocus::Left);
+        assert_eq!(u.active, u.list[0].id, "no left neighbour falls back to right");
     }
 
     #[test]

@@ -26,7 +26,8 @@ pub struct Report {
     pub engines: usize,
 }
 
-/// Flattens Chromium's `Bookmarks` JSON; `folder` is the slash-joined path below the root.
+/// Flattens Chromium's `Bookmarks` JSON. Bookmarks-bar items get folder paths relative to the bar
+/// ("" = on the bar itself); other roots are prefixed with their own name ("Autres favoris/...").
 pub fn parse_chromium_bookmarks(json: &str) -> Vec<Bookmark> {
     fn walk(node: &serde_json::Value, folder: &str, out: &mut Vec<Bookmark>) {
         let name = node["name"].as_str().unwrap_or("");
@@ -48,9 +49,7 @@ pub fn parse_chromium_bookmarks(json: &str) -> Vec<Bookmark> {
     }
     let mut out = vec![];
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
-        for root in v["roots"].as_object().into_iter().flat_map(|o| o.values()) {
-            walk(root, "", &mut out);
-        }
+        todo!()
     }
     out
 }
@@ -203,15 +202,16 @@ mod tests {
       "bookmark_bar":{"type":"folder","name":"Barre","children":[
         {"type":"url","name":"Rust","url":"https://rust-lang.org/"},
         {"type":"folder","name":"Dev","children":[{"type":"url","name":"GH","url":"https://github.com/"}]}]},
-      "other":{"type":"folder","name":"Autres","children":[{"type":"url","name":"JS","url":"javascript:alert(1)"}]},
+      "other":{"type":"folder","name":"Autres","children":[{"type":"url","name":"JS","url":"javascript:alert(1)"},{"type":"url","name":"Doc","url":"https://docs.rs/"}]},
       "synced":{"type":"folder","name":"Mobile","children":[]}}}"#;
 
     #[test]
     fn flattens_bookmarks_with_folders_and_skips_scripts() {
         let b = parse_chromium_bookmarks(BOOKMARKS);
-        assert_eq!(b.len(), 2);
-        assert_eq!(b[0], Bookmark { title: "Rust".into(), url: "https://rust-lang.org/".into(), folder: "Barre".into() });
-        assert_eq!(b[1].folder, "Barre/Dev");
+        assert_eq!(b.len(), 3);
+        assert_eq!(b[2].folder, "Autres");
+        assert_eq!(b[0], Bookmark { title: "Rust".into(), url: "https://rust-lang.org/".into(), folder: "".into() });
+        assert_eq!(b[1].folder, "Dev");
         assert!(parse_chromium_bookmarks("not json").is_empty());
     }
 

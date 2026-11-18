@@ -24,6 +24,8 @@ pub struct Profile {
     pub idle_minutes: u64,
     pub shields_off: Vec<String>,
     pub vertical_tabs: bool,
+    /// Saved settings; read through [`merged_prefs`].
+    pub prefs: serde_json::Value,
 }
 
 impl Default for Profile {
@@ -36,8 +38,17 @@ impl Default for Profile {
             idle_minutes: 15,
             shields_off: vec![],
             vertical_tabs: false,
+            prefs: serde_json::json!({}),
         }
     }
+}
+
+/// Every setting's default; the UI renders from the merged result so both sides share one source.
+pub const DEFAULTS: &str = include_str!("../ui/defaults.json");
+
+/// Defaults overlaid with the saved prefs (nested objects merge key by key; unknown saved keys survive).
+pub fn merged_prefs(saved: &serde_json::Value) -> serde_json::Value {
+    todo!()
 }
 
 pub fn data_dir() -> PathBuf {
@@ -200,6 +211,17 @@ mod tests {
         assert_eq!(n, 2);
         assert_eq!(h.top(1)[0].url, "https://a.com/");
         assert_eq!(h.top(10).len(), 2);
+    }
+
+    #[test]
+    fn prefs_merge_over_defaults() {
+        let saved = serde_json::json!({"theme": "dark", "lists": {"social": true}, "custom_key": 1});
+        let m = merged_prefs(&saved);
+        assert_eq!(m["theme"], "dark");
+        assert_eq!(m["zoom"], 100, "missing keys come from defaults");
+        assert_eq!(m["lists"]["social"], true);
+        assert_eq!(m["lists"]["default"], true, "nested defaults survive a partial save");
+        assert_eq!(m["custom_key"], 1);
     }
 
     #[test]
