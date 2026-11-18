@@ -94,4 +94,4 @@ Les erreurs de l'interface et les commandes reçues sont écrites dans `%LOCALAP
 - `src/main.rs` : fenêtre, WebView2, hooks natifs (filtre réseau, raccourcis, favicon, audio, capture)
 - `ui/index.html` : toute l'interface, sans framework
 
-Tests : `cargo test` (26 tests) ; preuves TDD dans `docs/tdd.md`.
+Tests : `cargo test` ; preuves TDD dans `docs/tdd.md` ; revue de sécurité dans `docs/SECURITY-REVIEW.md`.

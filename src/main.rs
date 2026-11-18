@@ -51,7 +51,7 @@ enum Ev {
     Backdrop(String),
     ShieldsReady(Shields, u64, usize),
     Cosmetic(TabId, Vec<String>, Vec<String>),
-    Gesture(String),
+    Gesture(TabId, String),
     Navigate(TabId, String),
     Quit,
     /// Developer-mode results computed off the UI thread, forwarded to the chrome as `L.dev(kind, data)`.
@@ -107,6 +107,23 @@ fn app_icon() -> Option<tao::window::Icon> {
     let mut buf = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).ok()?;
     tao::window::Icon::from_rgba(buf[..info.buffer_size()].to_vec(), info.width, info.height).ok()
+}
+
+/// Only web addresses may come from web content or sync files (no file:, javascript:, data: documents).
+pub(crate) fn is_web_url(u: &str) -> bool {
+    let l = u.trim_start().to_ascii_lowercase();
+    l.starts_with("https://") || l.starts_with("http://")
+}
+
+/// Icons shown by the chrome: web images or inline images only (a file:// or UNC icon could leak NTLM credentials).
+pub(crate) fn is_safe_icon(u: &str) -> bool {
+    is_web_url(u) || u.starts_with("data:image/")
+}
+
+/// Windows tools by absolute path, so a planted copy elsewhere on PATH is never run.
+pub(crate) fn system_tool(exe: &str) -> PathBuf {
+    let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    if exe.eq_ignore_ascii_case("explorer.exe") { root.join(exe) } else { root.join("System32").join(exe) }
 }
 
 /// Vivaldi's default gestures (hold right button and draw) plus rocker gestures B/F.
@@ -170,7 +187,8 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 /// Cache file for a list URL (lists are refreshed every 4 days).
 fn cache_name(url: &str) -> String {
     let s: String = url.trim_start_matches("https://").chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' }).collect();
-    s.chars().rev().take(120).collect::<Vec<_>>().into_iter().rev().collect()
+    let tail: String = s.chars().rev().take(110).collect::<Vec<_>>().into_iter().rev().collect();
+    format!("list-{tail}") // the prefix rules out "." and ".." as file names
 }
 
 fn fetch(url: &str, dir: &Path) -> Option<String> {
@@ -181,8 +199,9 @@ fn fetch(url: &str, dir: &Path) -> Option<String> {
         .is_ok_and(|t| t.elapsed().unwrap_or_default() < Duration::from_secs(4 * 86400));
     if !fresh {
         let tmp = file.with_extension("part");
-        let ok = std::process::Command::new("curl.exe")
-            .args(["-sfL", "--compressed", "--max-time", "90", "-o"])
+        let ok = std::process::Command::new(system_tool("curl.exe"))
+            // HTTPS only, redirects included: a filter list can carry scriptlets, so it must not be swappable on the wire
+            .args(["-sfL", "--proto", "=https", "--proto-redir", "=https", "--compressed", "--max-time", "90", "-o"])
             .arg(&tmp)
             .arg(url)
             .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
@@ -297,6 +316,7 @@ struct App {
     remote_tabs: Vec<Value>,
     sync_devices: Vec<Value>,
     last_sync: u64,
+    last_gesture: Instant,
 }
 
 impl App {
@@ -406,7 +426,8 @@ impl App {
         if tab.url.is_empty() {
             return false;
         }
-        let (url, private, container) = (tab.url.clone(), tab.private, tab.container.clone().filter(|_| !tab.private));
+        let container = tab.container.as_ref().filter(|_| !tab.private).map(|n| n.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(32).collect::<String>()).filter(|n| !n.is_empty());
+        let (url, private) = (tab.url.clone(), tab.private);
         let (p1, p2, p3, p4) = (self.proxy.clone(), self.proxy.clone(), self.proxy.clone(), self.proxy.clone());
         let page_js = PAGE_JS
             .replace("__GPC__", if self.pref_on("gpc") { "true" } else { "false" })
@@ -428,7 +449,7 @@ impl App {
                 let ev = match body.as_str() {
                     "F2" => Ev::Key("palette"),
                     "F6" => Ev::Key("focus"),
-                    b if b.starts_with("g:") && b.len() < 12 => Ev::Gesture(b[2..].to_string()),
+                    b if b.starts_with("g:") && b.len() < 12 => Ev::Gesture(id, b[2..].to_string()),
                     b if b.starts_with("c:") => {
                         let Ok(v) = serde_json::from_str::<Value>(&b[2..]) else { return };
                         let list = |k: &str| -> Vec<String> {
@@ -965,7 +986,11 @@ impl App {
 
     fn log(&self, line: &str) {
         use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(self.dir.join("leirk.log")) {
+        let path = self.dir.join("leirk.log");
+        if std::fs::metadata(&path).is_ok_and(|m| m.len() > 1_000_000) {
+            let _ = std::fs::rename(&path, path.with_extension("old.log"));
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
             let _ = writeln!(f, "{} {line}", now());
         }
     }
@@ -1020,9 +1045,9 @@ impl App {
         ];
         use std::os::windows::process::CommandExt;
         for args in reg {
-            let _ = std::process::Command::new("reg.exe").args(*args).creation_flags(0x0800_0000).status();
+            let _ = std::process::Command::new(system_tool("reg.exe")).args(*args).creation_flags(0x0800_0000).status();
         }
-        let _ = std::process::Command::new("explorer.exe").arg("ms-settings:defaultapps?registeredAppUser=Leirk").spawn();
+        let _ = std::process::Command::new(system_tool("explorer.exe")).arg("ms-settings:defaultapps?registeredAppUser=Leirk").spawn();
     }
 
     fn quit(&mut self) {
@@ -1040,8 +1065,8 @@ impl App {
     }
 
     fn command(&mut self, c: &str, v: &Value) {
-        if c != "query" && c != "layout" {
-            self.log(&format!("cmd {c} {}", if c == "pref" { v["k"].to_string() } else { v.to_string() }));
+        if !matches!(c, "query" | "layout" | "log" | "raise" | "tabInfo") {
+            self.log(&format!("cmd {c}")); // never the arguments: they carry URLs, searches and cookie values
         }
         if self.dev_command(c, v) || self.panel_command(c, v) || self.sync_command(c, v) {
             return;
@@ -1271,7 +1296,7 @@ impl App {
             }
             "engineAdd" => {
                 let e: Option<Engine> = serde_json::from_value(v.clone()).ok();
-                if let Some(e) = e.filter(|e| e.url.contains("%s") && !e.keyword.is_empty()) {
+                if let Some(e) = e.filter(|e| e.url.contains("%s") && is_web_url(&e.url) && !e.keyword.trim().is_empty()) {
                     self.profile.engines.retain(|x| !x.keyword.eq_ignore_ascii_case(&e.keyword));
                     self.profile.engines.push(e);
                 }
@@ -1300,7 +1325,9 @@ impl App {
                     }
                     _ => self.dir.display().to_string(),
                 };
-                let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
+                if !dir.is_empty() && !dir.starts_with('/') {
+                    let _ = std::process::Command::new(system_tool("explorer.exe")).arg(dir).spawn();
+                }
             }
             "quit" => return self.quit(),
             k if k.starts_with("tab") => {
@@ -1361,7 +1388,12 @@ impl App {
                 return;
             }
             Ev::Key(k) => return self.command(k, &Value::Null),
-            Ev::Gesture(path) => {
+            Ev::Gesture(from, path) => {
+                // any page can post this message: honour it only from the visible tab, at human speed
+                if !self.tabs.visible().contains(&from) || self.last_gesture.elapsed() < Duration::from_millis(300) {
+                    return;
+                }
+                self.last_gesture = Instant::now();
                 let rocker = path == "B" || path == "F";
                 let on = if rocker { self.pref_on("rocker") } else { self.pref_on("gestures") };
                 if let (true, Some(cmd)) = (on, gesture(&path)) {
@@ -1395,7 +1427,7 @@ impl App {
             }
             Ev::Repaint => {}
             Ev::SiteIcon(key, uri) => {
-                if !key.is_empty() && !uri.is_empty() && !self.favicons.get(&key).is_some_and(|v| v.starts_with("data:")) {
+                if !key.is_empty() && is_safe_icon(&uri) && !self.favicons.get(&key).is_some_and(|v| v.starts_with("data:")) {
                     self.favicons.insert(key, uri);
                     self.favicons_dirty = true;
                 }
@@ -1444,6 +1476,9 @@ impl App {
                 }
             }
             Ev::NewTab(url) => {
+                if !is_web_url(&url) && url != "about:blank" {
+                    return self.log("blocked a page opening a non-web address in a new tab");
+                }
                 let private = self.tabs.get(self.tabs.active).is_some_and(|t| t.private);
                 let bg = self.pref_on("links_bg");
                 self.new_tab(&url, private, bg);
@@ -1457,6 +1492,7 @@ impl App {
             }
             Ev::Favicon(id, f) => {
                 let Some(t) = self.tabs.get_mut(id) else { return };
+                let f = if is_safe_icon(&f) { f } else { String::new() };
                 t.favicon = f.clone();
                 let key = favicon_key(&t.url);
                 // remember the site's icon for bookmarks and history; imported data: icons work offline, keep them
@@ -1558,9 +1594,11 @@ fn main() {
         }
         _ => {}
     }
-    if let Some(arg) = std::env::args().nth(1) {
-        let url = if Path::new(&arg).exists() { format!("file:///{}", arg.replace('\\', "/")) } else { arg };
-        tabs.active = tabs.open(&url, false, None);
+    if let Some(arg) = std::env::args().nth(1).filter(|a| !a.starts_with('-')) {
+        let url = if Path::new(&arg).is_file() { Some(format!("file:///{}", arg.replace('\\', "/"))) } else { Some(arg).filter(|a| is_web_url(a)) };
+        if let Some(url) = url {
+            tabs.active = tabs.open(&url, false, None);
+        }
     }
     if tabs.list.is_empty() {
         tabs.active = tabs.open("", false, None);
@@ -1619,6 +1657,7 @@ fn main() {
         remote_tabs: vec![],
         sync_devices: vec![],
         last_sync: 0,
+        last_gesture: Instant::now(),
     };
     unsafe {
         let _ = app.hook_keys(&app.ui.controller());
@@ -1713,7 +1752,18 @@ mod tests {
     #[test]
     fn list_cache_names_are_file_safe() {
         let n = cache_name("https://raw.githubusercontent.com/a/b/filters-2024.txt?x=1");
-        assert!(n.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_'), "{n}");
+        assert!(n.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-'), "{n}");
         assert!(n.len() <= 120);
+        assert_eq!(cache_name("https://.."), "list-..", "never a bare . or .. path component");
+    }
+
+    #[test]
+    fn only_web_addresses_from_untrusted_sources() {
+        assert!(is_web_url("https://a.com/") && is_web_url("HTTP://a.com"));
+        for bad in ["file:///C:/x.html", "javascript:alert(1)", "data:text/html,x", r"\host\share", "about:blank"] {
+            assert!(!is_web_url(bad), "{bad}");
+        }
+        assert!(is_safe_icon("data:image/png;base64,AA") && is_safe_icon("https://a.com/f.ico"));
+        assert!(!is_safe_icon("file://attacker/share/x.ico") && !is_safe_icon("data:text/html,<b>"));
     }
 }

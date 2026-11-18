@@ -46,6 +46,12 @@ impl App {
             .filter_map(|p| std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str::<SyncDoc>(&s).ok()))
             .collect();
         others.sort_by_key(|d| std::cmp::Reverse(d.updated));
+        // a file in the cloud folder can be written by anyone with access to it: keep web addresses only
+        for d in &mut others {
+            d.bookmarks.retain(|b| is_web_url(&b.url));
+            d.engines.retain(|e| is_web_url(&e.url) && e.url.contains("%s"));
+            d.tabs.retain(|(_, u)| is_web_url(u));
+        }
 
         let mut docs: Vec<&SyncDoc> = vec![&own];
         docs.extend(others.iter());

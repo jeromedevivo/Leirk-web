@@ -473,7 +473,8 @@ impl App {
             }
             "devPorts" => {
                 std::thread::spawn(move || {
-                    let ports = parse_ports(&run("netstat", &["-ano", "-p", "tcp"]).unwrap_or_default(), &run("tasklist", &["/fo", "csv", "/nh"]).unwrap_or_default());
+                    let (netstat, tasklist) = (system_tool("netstat.exe"), system_tool("tasklist.exe"));
+                    let ports = parse_ports(&run(&netstat.to_string_lossy(), &["-ano", "-p", "tcp"]).unwrap_or_default(), &run(&tasklist.to_string_lossy(), &["/fo", "csv", "/nh"]).unwrap_or_default());
                     let _ = proxy.send_event(Ev::Dev("ports".into(), json!(ports)));
                 });
             }

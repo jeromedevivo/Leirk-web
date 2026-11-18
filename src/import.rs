@@ -122,12 +122,34 @@ pub fn sources() -> Vec<Source> {
 }
 
 /// Opens a copy of a browser database: the browser may hold a lock on the original while it runs.
-fn open_copy(src: &Path) -> Option<Connection> {
+/// A copy of another browser's database, deleted as soon as it is dropped (it holds your history).
+struct TempDb {
+    conn: Option<Connection>,
+    path: PathBuf,
+}
+
+impl std::ops::Deref for TempDb {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        self.conn.as_ref().expect("open until dropped")
+    }
+}
+
+impl Drop for TempDb {
+    fn drop(&mut self) {
+        drop(self.conn.take());
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn open_copy(src: &Path) -> Option<TempDb> {
     // one copy per database: History and Favicons are open at the same time
     let name = src.file_name()?.to_string_lossy().replace(' ', "_");
-    let tmp = std::env::temp_dir().join(format!("leirk-import-{}-{name}.sqlite", std::process::id()));
-    std::fs::copy(src, &tmp).ok()?;
-    Connection::open_with_flags(&tmp, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()
+    let path = std::env::temp_dir().join(format!("leirk-import-{}-{name}.sqlite", std::process::id()));
+    std::fs::copy(src, &path).ok()?;
+    let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).ok();
+    let db = TempDb { conn, path };
+    db.conn.is_some().then_some(db)
 }
 
 type Rows = Vec<(String, String, i64, i64)>;

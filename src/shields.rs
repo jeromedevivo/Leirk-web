@@ -76,8 +76,8 @@ pub fn list_urls(prefs: &Value) -> Vec<String> {
         AGGRESSIVE.iter().for_each(|u| push(u.to_string()));
     }
     for line in prefs["custom_lists"].as_str().unwrap_or("").lines().map(str::trim) {
-        if line.starts_with("http://") || line.starts_with("https://") {
-            push(line.to_string());
+        if line.starts_with("https://") {
+            push(line.to_string()); // lists can carry scriptlets: never over plain HTTP
         }
     }
     out
@@ -272,6 +272,8 @@ mod tests {
         let urls = list_urls(&p);
         assert!(urls.iter().any(|u| u.ends_with("/filters/2.txt")));
         assert!(urls.contains(&"https://example.com/list.txt".to_string()));
+        p["custom_lists"] = json!("http://insecure.example/list.txt");
+        assert!(!list_urls(&p).iter().any(|u| u.starts_with("http://")), "plain-HTTP lists are refused");
         p["shields_level"] = json!("off");
         assert!(list_urls(&p).is_empty());
     }
