@@ -10,6 +10,7 @@ const PRESETS = [
   ["Google Agenda", "https://calendar.google.com/"], ["Deezer", "https://www.deezer.com/"], ["YouTube Music", "https://music.youtube.com/"], ["X", "https://x.com/"],
 ];
 let sidePanel = null; // "dev" | panel id
+let appIcons = {};
 const panels = () => P("panels") || [];
 const devOn = () => !!P("dev_mode");
 const mod = m => devOn() && (P("dev_modules") || {})[m] !== false;
@@ -22,6 +23,7 @@ window.sideRect = function () {
 };
 
 function panelIcon(p) {
+  if (p.icon) return `<span class="fav img pimg"><img src="${esc(p.icon)}" alt=""></span>`;
   if (p.kind === "app") return `<span class="pico app">${esc((p.title || "?").charAt(0).toUpperCase())}</span>`;
   return fav({ url: p.url, title: p.title });
 }
@@ -86,7 +88,7 @@ function openPanelAdd() {
     <label class="lbl">Application Windows ouverte <span class="tag">expérimental</span></label>
     <small class="muted">La fenêtre de l'application est intégrée au panneau. Elle reprend sa place normale si vous la retirez ou quittez Leirk.</small>
     <div id="appList" class="applist"><small class="muted">Recherche des applications…</small></div>`;
-  show("panelPop");
+  show("panelPop", "#panelAdd");
   const p = $("#panelPop"); p.style.left = Math.max(8, innerWidth - p.offsetWidth - 60) + "px"; p.style.top = "90px";
   send("panelApps");
 }
@@ -105,13 +107,14 @@ $("#panelPop").addEventListener("click", e => {
     return addPanel({ kind: "web", title: hostOf(u), url: u });
   }
   const app = e.target.closest("[data-exe]");
-  if (app) addPanel({ kind: "app", title: app.dataset.title, exe: app.dataset.exe });
+  if (app) addPanel({ kind: "app", title: app.dataset.title, exe: app.dataset.exe, icon: appIcons[app.dataset.exe] || "" });
 });
 L.panelApps = list => {
   const seen = new Set();
   const uniq = list.filter(a => !seen.has(a.exe.toLowerCase()) && seen.add(a.exe.toLowerCase()));
   const box = $("#appList"); if (!box) return;
-  box.innerHTML = uniq.length ? uniq.map(a => { const n = a.exe.split("\\").pop(); return `<button class="row" data-exe="${esc(a.exe)}" data-title="${esc(n.replace(/\.exe$/i, ""))}"><span class="pico app">${esc(n.charAt(0).toUpperCase())}</span><span class="t">${esc(a.title)}</span><span class="k">${esc(n)}</span></button>`; }).join("")
+  appIcons = Object.fromEntries(uniq.map(a => [a.exe, a.icon]));
+  box.innerHTML = uniq.length ? uniq.map(a => { const n = a.exe.split("\\").pop(); return `<button class="row" data-exe="${esc(a.exe)}" data-title="${esc(n.replace(/\.exe$/i, ""))}">${a.icon ? `<span class="fav img pimg"><img src="${esc(a.icon)}" alt=""></span>` : `<span class="pico app">${esc(n.charAt(0).toUpperCase())}</span>`}<span class="t">${esc(a.title)}</span><span class="k">${esc(n)}</span></button>`; }).join("")
     : `<small class="muted">Aucune application ouverte. Lancez Teams ou Spotify puis rouvrez ce menu.</small>`;
 };
 

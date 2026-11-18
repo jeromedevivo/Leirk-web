@@ -59,6 +59,8 @@ enum Ev {
     TechDb(std::sync::Arc<leirk::tech::Db>),
     Thumb(TabId, String),
     Repaint,
+    /// A side panel's icon, remembered like a site's icon.
+    SiteIcon(String, String),
 }
 
 const TICK: Duration = Duration::from_secs(30);
@@ -1392,6 +1394,12 @@ impl App {
                 return;
             }
             Ev::Repaint => {}
+            Ev::SiteIcon(key, uri) => {
+                if !key.is_empty() && !uri.is_empty() && !self.favicons.get(&key).is_some_and(|v| v.starts_with("data:")) {
+                    self.favicons.insert(key, uri);
+                    self.favicons_dirty = true;
+                }
+            }
             Ev::Quit => std::process::exit(0),
             Ev::Cosmetic(id, classes, ids) => {
                 let (Some(v), Some(t)) = (self.views.get(&id), self.tabs.get(id)) else { return };
@@ -1429,6 +1437,10 @@ impl App {
                 } else {
                     self.loading.insert(id);
                     self.blocked.remove(&id);
+                    // a new document starts: what the developer tools collected belongs to the old one
+                    self.shared.errors.borrow_mut().remove(&id);
+                    self.shared.netlog.borrow_mut().remove(&id);
+                    self.shared.doc_headers.borrow_mut().remove(&id);
                 }
             }
             Ev::NewTab(url) => {

@@ -18,6 +18,56 @@ pub(crate) struct Docked {
     rect: RECT,
 }
 
+/// The 32 px icon of an executable as a `data:image/png` URL.
+pub(crate) fn exe_icon(path: &str) -> Option<String> {
+    use windows::Win32::Graphics::Gdi::{DeleteObject, GetDC, GetDIBits, ReleaseDC, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS};
+    use windows::Win32::UI::Shell::ExtractIconExW;
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
+    const S: i32 = 32;
+    unsafe {
+        let mut icon = HICON::default();
+        if ExtractIconExW(&HSTRING::from(path), 0, Some(&mut icon), None, 1) == 0 || icon.is_invalid() {
+            return None;
+        }
+        let mut info = ICONINFO::default();
+        let ok = GetIconInfo(icon, &mut info).is_ok();
+        let read = |bmp| -> Vec<u8> {
+            let mut bi = BITMAPINFO::default();
+            bi.bmiHeader = BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: S, biHeight: -S, biPlanes: 1, biBitCount: 32, biCompression: BI_RGB.0, ..Default::default() };
+            let mut px = vec![0u8; (S * S * 4) as usize];
+            let dc = GetDC(None);
+            let lines = GetDIBits(dc, bmp, 0, S as u32, Some(px.as_mut_ptr() as *mut _), &mut bi, DIB_RGB_COLORS);
+            ReleaseDC(None, dc);
+            if lines == S { px } else { vec![] }
+        };
+        let (color, mask) = if ok { (read(info.hbmColor), read(info.hbmMask)) } else { (vec![], vec![]) };
+        let _ = DeleteObject(info.hbmColor.into());
+        let _ = DeleteObject(info.hbmMask.into());
+        let _ = DestroyIcon(icon);
+        if color.len() != (S * S * 4) as usize {
+            return None;
+        }
+        // BGRA -> RGBA; old icons carry no alpha and use the mask instead
+        let no_alpha = color.chunks(4).all(|p| p[3] == 0);
+        let rgba: Vec<u8> = color
+            .chunks(4)
+            .enumerate()
+            .flat_map(|(i, p)| {
+                let a = if no_alpha { if mask.get(i * 4).copied().unwrap_or(0) == 0 { 255 } else { 0 } } else { p[3] };
+                [p[2], p[1], p[0], a]
+            })
+            .collect();
+        let mut out = vec![];
+        {
+            let mut enc = png::Encoder::new(&mut out, S as u32, S as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header().ok()?.write_image_data(&rgba).ok()?;
+        }
+        Some(format!("data:image/png;base64,{}", b64(&out)))
+    }
+}
+
 fn exe_of(pid: u32) -> String {
     unsafe {
         let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return String::new() };
@@ -105,6 +155,19 @@ impl App {
             let Ok(view) = built else { return };
             unsafe {
                 let _ = self.hook_keys(&view.controller());
+                if let Ok(w15) = view.webview().cast::<ICoreWebView2_15>() {
+                    let (proxy, key) = (self.proxy.clone(), favicon_key(url));
+                    let mut tok = Default::default();
+                    let _ = w15.add_FaviconChanged(
+                        &FaviconChangedEventHandler::create(Box::new(move |sender, _| {
+                            if let Some(w) = sender.and_then(|s| s.cast::<ICoreWebView2_15>().ok()) {
+                                let _ = proxy.send_event(Ev::SiteIcon(key.clone(), pwstr(|p| w.FaviconUri(p))));
+                            }
+                            Ok(())
+                        })),
+                        &mut tok,
+                    );
+                }
             }
             self.panel_views.insert(id.to_string(), view);
         }
@@ -195,7 +258,14 @@ impl App {
                 }
             }
             "panelApps" => {
-                let list: Vec<Value> = app_windows().into_iter().map(|(_, t, e)| json!({"title": t, "exe": e})).collect();
+                let mut icons: HashMap<String, Option<String>> = HashMap::new();
+                let list: Vec<Value> = app_windows()
+                    .into_iter()
+                    .map(|(_, t, e)| {
+                        let icon = icons.entry(e.to_lowercase()).or_insert_with(|| exe_icon(&e)).clone();
+                        json!({"title": t, "exe": e, "icon": icon})
+                    })
+                    .collect();
                 self.js(&format!("L.panelApps({})", Value::Array(list)));
             }
             _ => return false,
