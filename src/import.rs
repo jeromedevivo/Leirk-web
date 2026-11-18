@@ -25,6 +25,7 @@ pub struct Report {
     pub bookmarks: usize,
     pub history: usize,
     pub engines: usize,
+    pub favicons: usize,
 }
 
 /// Flattens Chromium's `Bookmarks` JSON. Bookmarks-bar items get folder paths relative to the bar
@@ -122,7 +123,9 @@ pub fn sources() -> Vec<Source> {
 
 /// Opens a copy of a browser database: the browser may hold a lock on the original while it runs.
 fn open_copy(src: &Path) -> Option<Connection> {
-    let tmp = std::env::temp_dir().join(format!("leirk-import-{}.sqlite", std::process::id()));
+    // one copy per database: History and Favicons are open at the same time
+    let name = src.file_name()?.to_string_lossy().replace(' ', "_");
+    let tmp = std::env::temp_dir().join(format!("leirk-import-{}-{name}.sqlite", std::process::id()));
     std::fs::copy(src, &tmp).ok()?;
     Connection::open_with_flags(&tmp, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()
 }
@@ -138,9 +141,22 @@ fn query_rows(db: &Connection, sql: &str) -> Rows {
     .unwrap_or_default()
 }
 
+/// Adds icons for `hosts` from a Chromium profile's `Favicons` database; returns how many were found.
+pub fn import_favicons(src: &Source, mut hosts: HashSet<String>, favicons: &mut HashMap<String, String>) -> usize {
+    hosts.retain(|h| !h.is_empty() && !favicons.contains_key(h));
+    if src.kind != Kind::Chromium || hosts.is_empty() {
+        return 0;
+    }
+    let Some(db) = open_copy(&src.dir.join("Favicons")) else { return 0 };
+    let found = chromium_favicons(&db, &hosts);
+    let n = found.len();
+    favicons.extend(found);
+    n
+}
+
 /// Imports bookmarks, history and (Chromium) search engines. Passwords are not imported:
 /// recent Chromium builds encrypt them with app-bound keys only the browser itself can read.
-pub fn import(src: &Source, profile: &mut Profile, history: &mut History) -> Report {
+pub fn import(src: &Source, profile: &mut Profile, history: &mut History, favicons: &mut HashMap<String, String>) -> Report {
     let mut r = Report::default();
     match src.kind {
         Kind::Chromium => {
@@ -153,6 +169,11 @@ pub fn import(src: &Source, profile: &mut Profile, history: &mut History) -> Rep
                     row.3 = chromium_time_to_unix(row.3);
                 }
                 r.history = history.import(&rows).unwrap_or(0);
+                // icons for every bookmark and the 500 most visited sites
+                rows.sort_by(|a, b| b.2.cmp(&a.2));
+                let mut hosts: HashSet<String> = profile.bookmarks.iter().map(|b| favicon_key(&b.url)).collect();
+                hosts.extend(rows.iter().take(500).map(|r| favicon_key(&r.0)));
+                r.favicons = import_favicons(src, hosts, favicons);
             }
             if let Some(db) = open_copy(&src.dir.join("Web Data")) {
                 let rows: Vec<(String, String, String)> = db
@@ -203,7 +224,21 @@ pub fn favicon_key(url: &str) -> String {
 /// Icons from a Chromium `Favicons` database for the given hosts, as `data:image/png` URLs.
 /// Prefers the 32 px bitmap (sharp on high-DPI), then the closest size.
 pub fn chromium_favicons(db: &Connection, hosts: &HashSet<String>) -> HashMap<String, String> {
-    todo!()
+    let mut best: HashMap<String, (i64, Vec<u8>)> = HashMap::new();
+    let sql = "SELECT m.page_url, b.image_data, b.width FROM icon_mapping m JOIN favicon_bitmaps b ON b.icon_id = m.icon_id";
+    let Ok(mut st) = db.prepare(sql) else { return HashMap::new() };
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<Vec<u8>>>(1)?, r.get::<_, i64>(2)?)));
+    for (url, data, width) in rows.into_iter().flatten().flatten() {
+        let (key, Some(data)) = (favicon_key(&url), data) else { continue };
+        if data.is_empty() || !hosts.contains(&key) {
+            continue;
+        }
+        let score = (width - 32).abs();
+        if best.get(&key).is_none_or(|(s, _)| score < *s) {
+            best.insert(key, (score, data));
+        }
+    }
+    best.into_iter().map(|(k, (_, d))| (k, format!("data:image/png;base64,{}", crate::b64::b64(&d)))).collect()
 }
 
 /// Chromium stores times as microseconds since 1601-01-01; Firefox as microseconds since 1970.
@@ -272,8 +307,9 @@ mod tests {
         let mut history = History::open(Path::new(":memory:")).unwrap();
         for src in sources() {
             let mut profile = Profile::default();
-            let r = import(&src, &mut profile, &mut history);
-            println!("{:<28} {:>5} signets {:>7} historique {:>3} moteurs", src.name, r.bookmarks, r.history, r.engines);
+            let mut icons = HashMap::new();
+            let r = import(&src, &mut profile, &mut history, &mut icons);
+            println!("{:<28} {:>5} favoris {:>7} historique {:>3} moteurs {:>4} icônes", src.name, r.bookmarks, r.history, r.engines, r.favicons);
         }
     }
 }

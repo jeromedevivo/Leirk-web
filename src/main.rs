@@ -3,7 +3,7 @@
 //! Leirk: a Rust shell over WebView2. Tabs are data; only visible and recently used tabs own a webview.
 use leirk::b64::{b64, unb64};
 use leirk::calc::calculate;
-use leirk::import;
+use leirk::import::{self, favicon_key};
 use leirk::omnibox::{resolve, Engine};
 use leirk::privacy::{https_upgrade, strip_tracking};
 use leirk::shields::{host, list_urls, Shields, Verdict, RESOURCES_URL};
@@ -254,6 +254,9 @@ struct App {
     overlay: bool,
     dirty: bool,
     bookmarks_dirty: bool,
+    /// Site icons by host (imported data: URLs or icon URLs seen while browsing).
+    favicons: HashMap<String, String>,
+    favicons_dirty: bool,
     restart_needed: bool,
     quitting: bool,
 }
@@ -751,6 +754,11 @@ impl App {
     }
 
     fn push(&mut self) {
+        if self.favicons_dirty {
+            self.favicons_dirty = false;
+            let _ = store::save_json(&self.dir.join("favicons.json"), &self.favicons);
+            self.js(&format!("L.favicons({})", json!(self.favicons)));
+        }
         if self.bookmarks_dirty {
             self.bookmarks_dirty = false;
             self.js(&format!("L.bookmarks({})", json!(self.profile.bookmarks)));
@@ -1144,12 +1152,13 @@ impl App {
                 };
                 let mut total = import::Report::default();
                 for s in &picked {
-                    let r = import::import(s, &mut self.profile, &mut self.history);
+                    let r = import::import(s, &mut self.profile, &mut self.history, &mut self.favicons);
                     total.bookmarks += r.bookmarks;
                     total.history += r.history;
                     total.engines += r.engines;
                 }
                 self.bookmarks_dirty = true;
+                self.favicons_dirty = true;
                 self.js(&format!("L.imported({})", json!(total)));
             }
             "pref" => {
@@ -1320,8 +1329,14 @@ impl App {
                 }
             }
             Ev::Favicon(id, f) => {
-                if let Some(t) = self.tabs.get_mut(id) {
-                    t.favicon = f;
+                let Some(t) = self.tabs.get_mut(id) else { return };
+                t.favicon = f.clone();
+                let key = favicon_key(&t.url);
+                // remember the site's icon for bookmarks and history; imported data: icons work offline, keep them
+                if !t.private && !f.is_empty() && !key.is_empty() && !self.favicons.get(&key).is_some_and(|v| v.starts_with("data:")) {
+                    if self.favicons.insert(key, f).is_none() {
+                        self.favicons_dirty = true;
+                    }
                 }
             }
             Ev::Audio(id, on) => {
@@ -1446,6 +1461,8 @@ fn main() {
         overlay: false,
         dirty: false,
         bookmarks_dirty: true,
+        favicons: store::load_json(&dir.join("favicons.json")),
+        favicons_dirty: true,
         restart_needed: false,
         quitting: false,
     };
@@ -1454,6 +1471,13 @@ fn main() {
         app.apply_profile(&app.ui.webview());
     }
     let _ = app.ui.zoom(app.scale());
+    // bookmarks imported before icons were: fetch theirs once from the installed browsers
+    if app.favicons.is_empty() && !app.profile.bookmarks.is_empty() {
+        let hosts: HashSet<String> = app.profile.bookmarks.iter().map(|b| favicon_key(&b.url)).collect();
+        for src in import::sources() {
+            import::import_favicons(&src, hosts.clone(), &mut app.favicons);
+        }
+    }
     app.tabs.activate(app.tabs.active, now());
     let _ = app.ui.focus();
     app.reload_shields();

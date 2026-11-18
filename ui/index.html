@@ -112,7 +112,9 @@ html[data-max] #grip { display: none; }
 #tabs .tab + .tab:not(.active):not(:hover)::before { content: ""; position: absolute; left: -1px; top: 9px; bottom: 9px; width: 1px; background: var(--line); }
 #tabs .tab.active + .tab::before, #tabs .tab:hover + .tab::before { display: none; }
 .fav { width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center; font-size: 10px; font-weight: 600; background: var(--field); color: var(--ink-2); overflow: hidden; }
-.fav img { width: 16px; height: 16px; }
+.fav img { width: 16px; height: 16px; object-fit: contain; }
+.fav.img { background: none; border-radius: 3px; }
+.site .fav img { width: 22px; height: 22px; }
 .fav svg { width: 11px; height: 11px; }
 .tab.unloaded .fav { filter: grayscale(1); opacity: .5; }
 .tab.unloaded .title { opacity: .58; }
@@ -224,7 +226,7 @@ html[data-overlay] #veil-tint { opacity: 1; }
 .row.calc .t { font-size: 15px; font-weight: 600; }
 .hint { display: flex; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 12px; }
 
-.menu { padding: 6px; min-width: 270px; max-height: 70vh; overflow-y: auto; }
+.menu { padding: 6px; min-width: 270px; max-width: 440px; max-height: 70vh; overflow-y: auto; }
 .menu .row { height: 32px; }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
 
@@ -460,16 +462,19 @@ const hostOf = u => { try { return new URL(u).host.replace(/^www\./, ""); } catc
 const root = document.documentElement;
 
 let S = { tabs: [], active: 0, tiled: [], url: "", shields: {}, prefs: {}, engines: [], lists: [] };
-let BM = [];
+let BM = [], FAV = {};
 const sel = new Set();
 let paletteMode = false, openPop = null, seq = 0, items = [], hi = 0, editing = false, lastResults = { bookmarks: [], history: [] }, lastRect = "";
 const P = k => S.prefs[k];
 
+/* Site icon: the tab's own, then the remembered or imported one, then /favicon.ico; a letter only as a last resort. */
 function fav(t) {
-  if (t.favicon) return `<span class="fav"><img src="${esc(t.favicon)}" alt="" onerror="this.remove()"></span>`;
   const h = hostOf(t.url);
   if (!h && !t.title) return `<span class="fav">${icon("search")}</span>`;
-  return `<span class="fav">${esc((h || t.title).charAt(0).toUpperCase())}</span>`;
+  const letter = esc((h || t.title).charAt(0).toUpperCase());
+  const src = t.favicon || FAV[h] || (/^https?:/.test(t.url || "") ? `https://${h}/favicon.ico` : "");
+  if (!src) return `<span class="fav">${letter}</span>`;
+  return `<span class="fav img" data-l="${letter}"><img src="${esc(src)}" alt="" loading="lazy" onerror="var p=this.parentNode;p.classList.remove('img');p.textContent=p.dataset.l"></span>`;
 }
 const tabTitle = t => t.title || (t.url ? hostOf(t.url) : "Nouvel onglet");
 function sendLayout() {
@@ -492,6 +497,7 @@ window.L = {
     syncOverlay();
   },
   bookmarks(list) { BM = list; renderBookmarksBar(); if (openPop === "settings") renderSettings(false); },
+  favicons(map) { FAV = map; renderTabs(); renderBookmarksBar(); renderNtp(); },
   focus() { focusField(); },
   palette() { openSheet(true); },
   results(n, r) { if (n === seq) { lastResults = r; build(); } },
@@ -692,7 +698,7 @@ function renderBookmarksBar() {
   if (show) {
     const tops = []; const seenF = new Set();
     for (const b of BM) {
-      if (!b.folder) tops.push(`<button class="bm" data-url="${esc(b.url)}" title="${esc(b.title + "\n" + b.url)}">${fav(b)}<span>${esc(b.title || hostOf(b.url))}</span></button>`);
+      if (!b.folder) tops.push(`<button class="bm" data-url="${esc(b.url)}" data-title="${esc(b.title || hostOf(b.url))}" title="${esc(b.title + "\n" + b.url)}">${fav(b)}<span>${esc(b.title || hostOf(b.url))}</span></button>`);
       else { const f = topFolder(b.folder); if (!seenF.has(f)) { seenF.add(f); tops.push(`<button class="bm" data-folder="${esc(f)}">${icon("folder")}<span>${esc(f)}</span></button>`); } }
     }
     bar.innerHTML = (tops.length ? tops.join("") : `<span class="bm" style="color:var(--ink-3);max-width:none">Ajoutez des favoris avec l'étoile ou Ctrl+D, ou importez-les depuis un autre navigateur.</span>`)
@@ -726,7 +732,7 @@ $("#bmbar").addEventListener("click", e => {
   if (b.dataset.folder) return showFolder(b.dataset.folder, r.left, r.bottom + 4);
   if (b.id === "bmmore") {
     const items = [...document.querySelectorAll("#bmbar .bm[hidden]")].map(el => el.dataset.url
-      ? ["", el.textContent, () => bmOpen(el.dataset.url), "", el.querySelector(".fav")?.outerHTML]
+      ? ["", el.dataset.title, () => bmOpen(el.dataset.url), "", el.querySelector(".fav")?.outerHTML, { url: el.dataset.url }]
       : ["folder", el.dataset.folder, () => setTimeout(() => showFolder(el.dataset.folder, r.left - 200, r.bottom + 4)), "›"]);
     showMenu("#menu", items, r.right - 280, r.bottom + 4);
   }
