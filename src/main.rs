@@ -45,6 +45,8 @@ enum Ev {
     Url(TabId, String),
     Loaded(TabId, bool, String),
     NewTab(String),
+    /// Addresses handed over by a second launch of Leirk ("" only brings the window forward).
+    Launched(Vec<String>),
     Blocked(TabId),
     Key(&'static str),
     Favicon(TabId, String),
@@ -1553,6 +1555,14 @@ impl App {
                     self.shared.doc_headers.borrow_mut().remove(&id);
                 }
             }
+            Ev::Launched(urls) => {
+                for u in urls.iter().filter_map(|u| launch_url(u)) {
+                    self.new_tab(&u, false, false);
+                }
+                self.window.set_minimized(false);
+                self.window.set_focus();
+                return;
+            }
             Ev::NewTab(url) => {
                 if !is_web_url(&url) && url != "about:blank" {
                     return self.log("blocked a page opening a non-web address in a new tab");
@@ -1605,9 +1615,46 @@ impl App {
     }
 }
 
+/// A command-line argument Leirk may open: an existing file or a web address, never options or script URLs.
+fn launch_url(arg: &str) -> Option<String> {
+    if arg.starts_with('-') {
+        return None;
+    }
+    if Path::new(arg).is_file() {
+        return Some(format!("file:///{}", arg.replace('\\', "/")));
+    }
+    Some(arg.to_string()).filter(|a| is_web_url(a))
+}
+
+/// One browser per profile, like Chrome: WebView2 refuses a second process on the same profile with other
+/// switches (the debugging port differs per launch). A later launch queues its address and leaves.
+fn hand_over_to_running(dir: &Path) -> bool {
+    use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows::Win32::System::Threading::CreateMutexW;
+    let key = dir.to_string_lossy().to_lowercase().bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
+    let Ok(mutex) = (unsafe { CreateMutexW(None, true, &HSTRING::from(format!("Local\\Leirk-{key:016x}"))) }) else { return false };
+    if unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
+        let _ = mutex; // never closed: held for the life of this process
+        return false;
+    }
+    let url = std::env::args().nth(1).and_then(|a| launch_url(&a)).unwrap_or_default();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("open.txt")) {
+        use std::io::Write;
+        let _ = writeln!(f, "{url}");
+    }
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(windows::Win32::UI::WindowsAndMessaging::ASFW_ANY);
+    }
+    true
+}
+
 fn main() {
     let dir = store::data_dir();
     let _ = std::fs::create_dir_all(&dir);
+    if hand_over_to_running(&dir) {
+        return;
+    }
+    let _ = std::fs::remove_file(dir.join("open.txt")); // left by launches while no Leirk was running
     let log = dir.join("leirk.log");
     std::panic::set_hook(Box::new(move |info| {
         use std::io::Write;
@@ -1638,6 +1685,16 @@ fn main() {
 
     let event_loop = EventLoopBuilder::<Ev>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    let (queue, launches) = (dir.join("open.txt"), proxy.clone());
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(300));
+        if let Ok(text) = std::fs::read_to_string(&queue) {
+            let _ = std::fs::remove_file(&queue);
+            if launches.send_event(Ev::Launched(text.lines().map(String::from).collect())).is_err() {
+                break;
+            }
+        }
+    });
     let window = WindowBuilder::new()
         .with_title("Leirk")
         .with_decorations(false)
@@ -1684,11 +1741,8 @@ fn main() {
         }
         _ => {}
     }
-    if let Some(arg) = std::env::args().nth(1).filter(|a| !a.starts_with('-')) {
-        let url = if Path::new(&arg).is_file() { Some(format!("file:///{}", arg.replace('\\', "/"))) } else { Some(arg).filter(|a| is_web_url(a)) };
-        if let Some(url) = url {
-            tabs.active = tabs.open(&url, false, None);
-        }
+    if let Some(url) = std::env::args().nth(1).and_then(|a| launch_url(&a)) {
+        tabs.active = tabs.open(&url, false, None);
     }
     if tabs.list.is_empty() {
         tabs.active = tabs.open("", false, None);
@@ -1864,6 +1918,11 @@ mod tests {
     #[test]
     fn only_web_addresses_from_untrusted_sources() {
         assert!(is_web_url("https://a.com/") && is_web_url("HTTP://a.com"));
+        // command line and second-launch hand-over
+        assert_eq!(launch_url("https://a.com/").as_deref(), Some("https://a.com/"));
+        assert_eq!(launch_url("--flag"), None);
+        assert_eq!(launch_url("javascript:alert(1)"), None);
+        assert_eq!(launch_url(""), None);
         for bad in ["file:///C:/x.html", "javascript:alert(1)", "data:text/html,x", r"\host\share", "about:blank"] {
             assert!(!is_web_url(bad), "{bad}");
         }
