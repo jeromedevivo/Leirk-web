@@ -29,6 +29,16 @@ Attaquants considérés : une page web malveillante (y compris une iframe public
 
 Tests ajoutés : `only_web_addresses_from_untrusted_sources`, `list_cache_names_are_file_safe`, et le refus des listes en HTTP dans `list_selection_follows_prefs`.
 
+## Nouvelle surface : l'API locale des DevTools
+Pour que l'onglet « Leirk » des DevTools (une extension) puisse parler au navigateur, Leirk ouvre un mini-serveur HTTP. Il est protégé ainsi :
+- **réseau** : écoute sur `127.0.0.1` uniquement, port aléatoire à chaque lancement ;
+- **jeton secret** : 128 bits tirés du générateur cryptographique de Windows (`BCryptGenRandom`), comparés en temps constant, écrits seulement dans les fichiers de l'extension, qu'aucune page web ne peut lire ;
+- **origine** : une requête est refusée si son origine n'est pas `chrome-extension://` ou si l'en-tête `Host` n'est pas exactement `127.0.0.1:<port>`, ce qui bloque le DNS rebinding ;
+- **limites** : en-têtes de 16 Ko maximum, corps de 64 Ko maximum, délai de 3 s ;
+- **commandes** : rien ne s'exécute si le mode développeur est désactivé, et `open` n'accepte que des adresses web.
+
+Une page web peut annoncer `devhello:<nonce>`, mais cela associe seulement un identifiant aléatoire à son propre onglet. Sans le jeton, elle ne peut appeler aucune commande. Test : `devapi::tests::token_is_random_and_compared_in_constant_time`.
+
 ## Risques connus, acceptés ou à traiter plus tard
 - **Retour en HTTP après échec du HTTPS** (comportement standard de Brave) : un attaquant réseau qui bloque le port 443 obtient la version HTTP. Un mode strict pourra être ajouté.
 - **Ressources Brave (`resources.json`) et listes uBlock** : elles sont chargées depuis GitHub en HTTPS, sans signature vérifiée. On fait confiance aux mêmes sources que Brave.

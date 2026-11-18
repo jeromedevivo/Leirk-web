@@ -29,9 +29,8 @@ function panelIcon(p) {
 }
 function renderPanelBar() {
   const bar = $("#panelbar");
-  bar.hidden = P("panel_bar") === false && !devOn() && !panels().length;
-  bar.innerHTML = (devOn() ? `<button class="pbtn${sidePanel === "dev" ? " on" : ""}" data-panel="dev" title="Mode développeur">${icon("code")}</button><hr>` : "")
-    + panels().map(p => `<button class="pbtn${sidePanel === p.id ? " on" : ""}" data-panel="${esc(p.id)}" title="${esc(p.title)}${p.kind === "app" ? " · application Windows (expérimental)" : ""}">${panelIcon(p)}</button>`).join("")
+  bar.hidden = P("panel_bar") === false && !panels().length;
+  bar.innerHTML = panels().map(p => `<button class="pbtn${sidePanel === p.id ? " on" : ""}" data-panel="${esc(p.id)}" title="${esc(p.title)}${p.kind === "app" ? " · application Windows (expérimental)" : ""}">${panelIcon(p)}</button>`).join("")
     + `<button class="pbtn add" id="panelAdd" title="Ajouter un panneau">${icon("plus")}</button>`;
   const side = $("#side");
   side.hidden = !sidePanel;
@@ -42,9 +41,8 @@ function renderPanelBar() {
     $("#sideReload").hidden = sidePanel === "dev";
     $("#sideUnload").hidden = sidePanel === "dev";
     $("#sidebody").classList.toggle("dev", sidePanel === "dev");
-    if (sidePanel === "dev") { if (!$("#devbody")) renderDev(); }
-    else $("#sidebody").innerHTML = "";
-  } else clearInterval(devTimer);
+    $("#sidebody").innerHTML = "";
+  }
   sendLayout();
 }
 function openPanel(id) {
@@ -151,36 +149,7 @@ function showCard(id, el) {
   send("tabInfo", id);
 }
 
-/* ---------- developer panel ---------- */
-const DEV_MODULES = [
-  ["tech", "palette", "Technologies"], ["network", "globe", "Réseau"], ["errors", "x", "Erreurs JS"], ["docker", "stack", "Docker"],
-  ["ports", "tabs", "Ports locaux"], ["perf", "cpu", "Performances"], ["storage", "key", "Cookies et stockage"], ["responsive", "tile", "Responsive"], ["tools", "cmd", "Outils"],
-];
-let devTab = "tech", devData = {}, devTimer = 0, netFilter = "", logsFor = "", devUrl = "";
-function devModules() { return DEV_MODULES.filter(([m]) => mod(m)); }
-function renderDev() {
-  const mods = devModules();
-  if (!mods.length) { $("#sidebody").innerHTML = `<p class="muted pad">Aucun module actif. Choisissez-les dans Réglages › Mode développeur.</p>`; return; }
-  if (!mods.some(([m]) => m === devTab)) devTab = mods[0][0];
-  $("#sidebody").innerHTML = `<nav class="devnav">${mods.map(([m, i, t]) => `<button data-dev="${m}" class="${m === devTab ? "on" : ""}" title="${t}">${icon(i)}<span>${t}</span></button>`).join("")}</nav><div id="devbody" class="devbody"></div>`;
-  devRefresh();
-}
-function devRefresh() {
-  clearInterval(devTimer);
-  const ask = { tech: "devTech", network: "devNet", errors: "devErrors", docker: "devDocker", ports: "devPorts", perf: "devPerf", storage: "devCookies" }[devTab];
-  if (ask) { send(ask); if (devTab === "storage") send("devStorage"); }
-  const every = { network: 1000, errors: 1500, docker: 5000, perf: 2000 }[devTab];
-  if (every) devTimer = setInterval(() => { if (sidePanel === "dev" && !document.hidden) send(ask); }, every);
-  devUrl = S.url;
-  devPaint();
-}
-$("#sidebody").addEventListener("click", e => {
-  const nav = e.target.closest("[data-dev]");
-  if (nav) { devTab = nav.dataset.dev; renderDev(); return; }
-  const a = e.target.closest("[data-act]"); if (!a) return;
-  devAction(a.dataset.act, a.dataset);
-});
-$("#sidebody").addEventListener("input", e => { if (e.target.id === "netFilter") { netFilter = e.target.value; devPaint(true); } if (e.target.id === "toolIn") toolRun(); });
+/* Developer tools live in the DevTools "Leirk" tab (F12); the chrome only shows hover cards and captures here. */
 L.dev = (kind, data) => {
   if (kind === "tabInfo") {
     if (data.id !== hoverId) return;
@@ -191,142 +160,7 @@ L.dev = (kind, data) => {
     return;
   }
   if (kind === "capture") return data.ok ? toast(`Capture enregistrée (${data.w}×${data.h} px) dans Images › Leirk`) : toast(`Capture impossible : ${data.error}`);
-  devData[kind] = data;
-  if (sidePanel === "dev") devPaint();
 };
-const fmtBytes = b => b == null ? "—" : b < 1024 ? b + " o" : b < 1048576 ? (b / 1024).toFixed(1) + " Ko" : (b / 1048576).toFixed(1) + " Mo";
-function devPaint(keepInput) {
-  const body = $("#devbody"); if (!body) return;
-  if (document.activeElement && body.contains(document.activeElement) && /INPUT|TEXTAREA/.test(document.activeElement.tagName) && !keepInput) return;
-  const d = devData, keepScroll = body.scrollTop;
-  let html = "";
-  switch (devTab) {
-    case "tech": {
-      const t = d.tech;
-      if (!S.url) html = `<p class="muted">Ouvrez un site pour voir ses technologies.</p>`;
-      else if (!t || t.loading) html = `<p class="muted">${t?.loading ? "Téléchargement de la base Wappalyzer (une seule fois)…" : "Analyse…"}</p>`;
-      else {
-        const groups = {}; (t.found || []).forEach(f => (groups[f.category || "Autres"] ||= []).push(f));
-        html = `<div class="devbar"><b>${(t.found || []).length} technologies</b><button class="btn" data-act="techRefresh">Analyser à nouveau</button></div>`
-          + (Object.keys(groups).length ? Object.entries(groups).map(([c, l]) => `<h4>${esc(c)}</h4>` + l.map(f =>
-            `<div class="drow"><img class="ticon" src="https://raw.githubusercontent.com/enthec/webappanalyzer/main/src/images/icons/${encodeURIComponent(f.icon)}" alt="" onerror="this.style.visibility='hidden'"><span class="t">${esc(f.name)}</span><span class="k">${esc(f.version)}</span></div>`).join("")).join("")
-          : `<p class="muted">Aucune technologie reconnue parmi ${t.known}.</p>`);
-      }
-      break;
-    }
-    case "network": {
-      const all = d.network || [];
-      const rows = all.filter(r => !netFilter || r.u.toLowerCase().includes(netFilter.toLowerCase())).slice(-250).reverse();
-      html = `<div class="devbar"><input class="in" id="netFilter" placeholder="Filtrer les adresses" value="${esc(netFilter)}"><button class="btn" data-act="netClear">Effacer</button></div>
-        <div class="muted small">${all.length} requêtes · ${all.filter(r => r.b).length} bloquées par Shields · rechargez la page pour tout voir</div>
-        <table class="net"><thead><tr><th>Statut</th><th>Type</th><th>Adresse</th><th>Taille</th><th>ms</th><th></th></tr></thead><tbody>${rows.map(r => `<tr class="${r.b ? "blocked" : r.s >= 400 ? "bad" : ""}">
-          <td>${r.b ? "bloqué" : r.s || "…"}</td><td>${esc(r.t)}</td><td class="u" title="${esc(r.u)}">${esc(r.m)} ${esc(r.u.replace(/^https?:\/\//, ""))}</td><td>${fmtBytes(r.z)}</td><td>${r.d ?? ""}</td>
-          <td class="acts"><button data-act="copyUrl" data-u="${esc(r.u)}" title="Copier l'adresse">${icon("tabs")}</button><button data-act="copyCurl" data-u="${esc(r.u)}" data-m="${esc(r.m)}" title="Copier en cURL">${icon("cmd")}</button><button data-act="replay" data-u="${esc(r.u)}" data-m="${esc(r.m)}" title="Rejouer">${icon("reload")}</button></td></tr>`).join("")}</tbody></table>`;
-      break;
-    }
-    case "errors": {
-      const errs = d.errors || [];
-      html = `<div class="devbar"><b>${errs.length} erreur${errs.length > 1 ? "s" : ""}</b><button class="btn" data-act="errClear">Effacer</button></div>`
-        + (errs.length ? errs.slice().reverse().map(e => `<div class="errrow"><div>${esc(e.msg)}</div><small class="muted">${esc(e.src)}</small></div>`).join("") : `<p class="muted">Aucune erreur sur cette page. Une pastille rouge apparaît sur l'onglet dès qu'il y en a.</p>`);
-      break;
-    }
-    case "docker": {
-      const k = d.docker;
-      if (!k) html = `<p class="muted">Lecture de Docker…</p>`;
-      else if (k.error) html = `<p class="muted">Docker ne répond pas : ${esc(k.error)}</p>`;
-      else html = `<div class="devbar"><b>${k.containers.length} conteneurs · ${k.containers.filter(c => c.state === "running").length} actifs</b><button class="btn" data-act="dockerRefresh">Actualiser</button></div>`
-        + k.containers.map(c => `<div class="card"><div class="ctop"><span class="dot ${c.state === "running" ? "ok" : ""}"></span><b>${esc(c.name)}</b><span class="muted small">${esc(c.image)}</span></div>
-          <div class="muted small">${esc(c.status)}${c.cpu ? ` · CPU ${esc(c.cpu)} · RAM ${esc(c.mem)}` : ""}</div>
-          <div class="cact">${c.ports.map(p => `<button class="chipbtn" data-act="openPort" data-port="${p}">localhost:${p}</button>`).join("")}
-          <span class="grow"></span>${c.state === "running" ? `<button class="btn" data-act="docker" data-id="${c.id}" data-op="restart">Redémarrer</button><button class="btn" data-act="docker" data-id="${c.id}" data-op="stop">Arrêter</button>` : `<button class="btn primary" data-act="docker" data-id="${c.id}" data-op="start">Démarrer</button>`}
-          <button class="btn" data-act="logs" data-id="${c.id}">Logs</button></div>${logsFor === c.id && d.logs?.id === c.id ? `<pre class="logs">${esc(d.logs.text)}</pre>` : ""}</div>`).join("");
-      break;
-    }
-    case "ports": {
-      const p = d.ports || [];
-      html = `<div class="devbar"><b>${p.length} ports en écoute</b><button class="btn" data-act="portsRefresh">Actualiser</button></div>`
-        + p.map(x => `<div class="drow"><b class="port">${x.port}</b><span class="t">${esc(x.process || "?")}</span><span class="k muted">pid ${x.pid}</span><button class="btn" data-act="openPort" data-port="${x.port}">Ouvrir</button></div>`).join("");
-      break;
-    }
-    case "perf": {
-      const a = d.perfApp || {}, m = d.perfMetrics || {}, v = d.vitals || {};
-      const grade = (val, good, bad) => val == null ? "" : val <= good ? "good" : val <= bad ? "mid" : "bad";
-      html = `<h4>Page active</h4><div class="kpis">
-        <div class="kpi ${grade(v.lcp, 2500, 4000)}"><b>${v.lcp ?? "—"}</b><span>LCP ms</span></div><div class="kpi ${grade(v.cls, 0.1, 0.25)}"><b>${v.cls ?? "—"}</b><span>CLS</span></div>
-        <div class="kpi ${grade(v.fcp, 1800, 3000)}"><b>${v.fcp ?? "—"}</b><span>FCP ms</span></div><div class="kpi ${grade(v.ttfb, 800, 1800)}"><b>${v.ttfb ?? "—"}</b><span>TTFB ms</span></div></div>
-        <div class="drow"><span class="t">Tas JavaScript</span><span class="k">${fmtBytes(m.JSHeapUsedSize)}</span></div><div class="drow"><span class="t">Nœuds DOM</span><span class="k">${v.nodes ?? m.Nodes ?? "—"}</span></div>
-        <div class="drow"><span class="t">Mises en page</span><span class="k">${m.LayoutCount ?? "—"}</span></div><div class="drow"><span class="t">Transféré</span><span class="k">${fmtBytes(v.transfer)}</span></div><div class="drow"><span class="t">Chargement complet</span><span class="k">${v.load ?? "—"} ms</span></div>
-        <h4>Leirk</h4><div class="drow"><span class="t">Processus principal</span><span class="k">${a.mb ?? "—"} Mo · CPU ${a.cpu ?? 0} %</span></div>
-        <h4>Onglets en mémoire</h4>${(d.perfTabs || []).map(t => `<div class="drow"><span class="t">${esc(t.title || "")}</span><span class="k">${t.mb} Mo</span></div>`).join("") || `<p class="muted">—</p>`}`;
-      break;
-    }
-    case "storage": {
-      const ck = d.cookies || [], st = d.storage || { local: [], session: [] };
-      const kv = (area, list) => list.map(([k, v]) => `<div class="drow"><span class="t" title="${esc(v)}">${esc(k)}</span><span class="k mono">${esc(String(v).slice(0, 40))}</span><button class="icon" data-act="stEdit" data-area="${area}" data-k="${esc(k)}" title="Modifier">${icon("edit")}</button><button class="icon" data-act="stDel" data-area="${area}" data-k="${esc(k)}" title="Supprimer">${icon("trash")}</button></div>`).join("") || `<p class="muted small">Vide.</p>`;
-      html = `<div class="devbar"><b>${ck.length} cookies</b><button class="btn" data-act="storageRefresh">Actualiser</button></div>`
-        + ck.map(c => `<div class="drow"><span class="t" title="${esc(c.domain + c.path)}">${esc(c.name)}</span><span class="k mono">${esc(String(c.value).slice(0, 40))}</span><button class="icon" data-act="ckEdit" data-name="${esc(c.name)}" data-domain="${esc(c.domain)}" data-path="${esc(c.path)}" title="Modifier">${icon("edit")}</button><button class="icon" data-act="ckDel" data-name="${esc(c.name)}" data-domain="${esc(c.domain)}" data-path="${esc(c.path)}" title="Supprimer">${icon("trash")}</button></div>`).join("")
-        + `<h4>localStorage</h4>${kv("local", st.local || [])}<h4>sessionStorage</h4>${kv("session", st.session || [])}
-        <div class="inline" style="margin-top:8px"><input class="in" id="stK" placeholder="clé"><input class="in" id="stV" placeholder="valeur"><button class="btn" data-act="stAdd">Ajouter</button></div>`;
-      break;
-    }
-    case "responsive": {
-      const envs = (P("dev_envs") || "").split("\n").map(s => s.trim()).filter(Boolean);
-      const dev = [["iPhone 15", 393, 852, 3, 1], ["Pixel 8", 412, 915, 2.6, 1], ["iPad", 820, 1180, 2, 1], ["Portable", 1366, 768, 1, 0], ["Full HD", 1920, 1080, 1, 0]];
-      html = `<h4>Appareil</h4><div class="chips">${dev.map(([n, w, h, r, m]) => `<button class="chipbtn" data-act="device" data-w="${w}" data-h="${h}" data-r="${r}" data-m="${m}">${n} · ${w}×${h}</button>`).join("")}<button class="chipbtn" data-act="deviceReset">Taille réelle</button></div>
-        <div class="inline" style="margin-top:8px"><input class="in" id="devW" placeholder="largeur" type="number"><input class="in" id="devH" placeholder="hauteur" type="number"><button class="btn" data-act="deviceCustom">Appliquer</button></div>
-        <h4>Réseau</h4><div class="chips">${[["normal", "Normal"], ["4g", "4G"], ["3g", "3G lente"], ["offline", "Hors ligne"]].map(([v, l]) => `<button class="chipbtn" data-act="throttle" data-v="${v}">${l}</button>`).join("")}</div>
-        <h4>Environnements</h4>${envs.length ? `<div class="chips">${envs.map(h => `<button class="chipbtn" data-act="env" data-host="${esc(h)}">${esc(h)}</button>`).join("")}</div><small class="muted">Ouvre la même page sur cet hôte.</small>` : `<p class="muted small">Ajoutez vos hôtes (localhost:3000, staging.monapp.fr, monapp.fr) dans Réglages › Mode développeur.</p>`}`;
-      break;
-    }
-    case "tools":
-      if ($("#toolIn")) return;
-      html = `<textarea class="in" id="toolIn" rows="5" placeholder="Collez un JWT, du Base64, du JSON, un timestamp, une URL…"></textarea>
-        <div class="chips" style="margin:8px 0">${[["jwt", "Décoder JWT"], ["b64", "→ Base64"], ["d64", "Base64 →"], ["url", "→ URL"], ["durl", "URL →"], ["json", "Formater JSON"], ["ts", "Timestamp ↔ date"], ["uuid", "UUID"], ["len", "Compter"]].map(([k, l]) => `<button class="chipbtn" data-act="tool" data-k="${k}">${l}</button>`).join("")}</div>
-        <pre class="logs" id="toolOut">Ces outils marchent aussi dans F2 : « jwt eyJ… », « b64 texte », « ts 1700000000 », « uuid ».</pre>`;
-      break;
-  }
-  const focus = document.activeElement?.id;
-  body.innerHTML = html;
-  body.scrollTop = keepScroll;
-  if (focus === "netFilter") { const f = $("#netFilter"); f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
-}
-let toolKind = "jwt";
-function toolRun(k) {
-  if (k) toolKind = k;
-  const v = $("#toolIn")?.value || "", out = devTool(toolKind, v.trim());
-  if ($("#toolOut")) $("#toolOut").textContent = out ?? "Entrée non reconnue.";
-}
-function devAction(act, ds) {
-  const curl = (m, u) => `curl -X ${m} '${u.replace(/'/g, "'\\''")}' -H 'User-Agent: ${navigator.userAgent}'`;
-  switch (act) {
-    case "techRefresh": devData.tech = null; devPaint(); return send("devTech");
-    case "netClear": send("devNetClear"); devData.network = []; return devPaint();
-    case "copyUrl": navigator.clipboard?.writeText(ds.u); return toast("Adresse copiée");
-    case "copyCurl": navigator.clipboard?.writeText(curl(ds.m, ds.u)); return toast("Commande cURL copiée");
-    case "replay": send("devReplay", { u: ds.u, m: ds.m }); return toast("Requête rejouée depuis la page");
-    case "errClear": send("devErrorsClear"); devData.errors = []; return devPaint();
-    case "dockerRefresh": return send("devDocker");
-    case "docker": toast(`Docker : ${ds.op}…`); return send("devDockerAct", { id: ds.id, act: ds.op });
-    case "logs": logsFor = logsFor === ds.id ? "" : ds.id; if (logsFor) send("devDockerLogs", ds.id); return devPaint();
-    case "openPort": return send("open", `http://localhost:${ds.port}`);
-    case "portsRefresh": return send("devPorts");
-    case "storageRefresh": send("devCookies"); return send("devStorage");
-    case "ckDel": send("devCookieDel", { name: ds.name, domain: ds.domain, path: ds.path }); return setTimeout(() => send("devCookies"), 150);
-    case "ckEdit": { const val = prompt(`Nouvelle valeur de ${ds.name}`); if (val == null) return; send("devCookieSet", { name: ds.name, value: val, domain: ds.domain, path: ds.path }); return setTimeout(() => send("devCookies"), 150); }
-    case "stDel": send("devStorageDel", { area: ds.area, k: ds.k }); return setTimeout(() => send("devStorage"), 150);
-    case "stEdit": { const val = prompt(`Nouvelle valeur de ${ds.k}`); if (val == null) return; send("devStorageSet", { area: ds.area, k: ds.k, v: val }); return setTimeout(() => send("devStorage"), 150); }
-    case "stAdd": { const k = $("#stK").value.trim(); if (!k) return; send("devStorageSet", { area: "local", k, v: $("#stV").value }); return setTimeout(() => send("devStorage"), 150); }
-    case "device": send("devDevice", { w: +ds.w, h: +ds.h, dpr: +ds.r, mobile: ds.m === "1" }); return toast(`Émulation ${ds.w}×${ds.h}`);
-    case "deviceCustom": { const w = +$("#devW").value, h = +$("#devH").value; if (w && h) send("devDevice", { w, h, dpr: 1, mobile: false }); return; }
-    case "deviceReset": send("devDevice", null); return toast("Taille réelle");
-    case "throttle": send("devThrottle", ds.v); return toast(ds.v === "normal" ? "Réseau normal" : `Réseau simulé : ${ds.v}`);
-    case "env": {
-      try { const u = new URL(S.url); const local = /^localhost|^127\.|^\d+\.\d+\.\d+\.\d+/.test(ds.host); send("nav", `${local ? "http" : "https"}://${ds.host}${u.pathname}${u.search}${u.hash}`); } catch { send("nav", ds.host); }
-      return;
-    }
-    case "tool": return toolRun(ds.k);
-  }
-}
 
 /* Developer tools, shared by the panel and F2 ("jwt …", "b64 …"). */
 function devTool(kind, v) {
@@ -364,7 +198,7 @@ window.lateGroups = function (q, groups) {
 COMMANDS.push(
   ["download", "Capture de la page entière", () => send("capture"), "Ctrl+Maj+S", () => !!S.url],
   ["code", "Mode développeur : activer / désactiver", () => setPref("dev_mode", !devOn())],
-  ["code", "Ouvrir le panneau développeur", () => { if (sidePanel !== "dev") openPanel("dev"); }, "", () => devOn()],
+  ["code", "Outils développeur Leirk (DevTools)", () => send("devtools"), "F12", () => devOn() && !!S.url],
   ["code", "Couper / réactiver JavaScript sur ce site", () => send("noscript"), "", () => !!S.shields.site],
   ["tabs", "Ajouter un panneau latéral", () => openPanelAdd()],
 );
@@ -396,9 +230,7 @@ window.renderExtras = function () {
   b.hidden = !(mod("js") && S.url);
   b.classList.toggle("off", !!S.shields.noscript);
   b.title = S.shields.noscript ? "JavaScript coupé sur ce site — cliquer pour réactiver" : "Couper JavaScript sur ce site";
-  if (!devOn() && sidePanel === "dev") sidePanel = null;
   if (sidePanel && sidePanel !== "dev" && !panels().some(p => p.id === sidePanel)) sidePanel = null;
-  if (sidePanel === "dev" && S.url !== devUrl && $("#devbody")) devRefresh();
   refreshCommands();
   renderPanelBar();
 };
@@ -412,7 +244,7 @@ SECTIONS.splice(SECTIONS.findIndex(s => s.id === "import"), 0,
   ]},
   { id: "sync", icon: "reload", title: "Synchronisation", items: [{ type: "sync" }] },
   { id: "dev", icon: "code", title: "Mode développeur", items: [
-    { k: "dev_mode", t: "Activer le mode développeur", d: "Ajoute le panneau </> et les modules choisis. Désactivé, rien ne tourne en arrière-plan.", type: "toggle" },
+    { k: "dev_mode", t: "Activer le mode développeur", d: "Les outils apparaissent dans les DevTools (F12) › onglet « Leirk ». Rien n'est visible dans l'interface pour les autres utilisateurs ; désactivé, rien ne tourne en arrière-plan.", type: "toggle" },
     { h: "Modules" },
     { k: "dev_modules.js", t: "JavaScript en un clic", d: "Bouton JS dans la barre d'outils pour couper ou réactiver les scripts du site.", type: "sub" },
     { k: "dev_modules.tech", t: "Technologies (Wappalyzer)", d: "Frameworks, CMS, serveurs, analytics… avec leurs versions.", type: "sub" },
@@ -422,8 +254,7 @@ SECTIONS.splice(SECTIONS.findIndex(s => s.id === "import"), 0,
     { k: "dev_modules.ports", t: "Ports locaux", d: "Serveurs en écoute sur ce PC (vite, node, postgres…).", type: "sub" },
     { k: "dev_modules.perf", t: "Performances", d: "RAM par onglet, Web Vitals, tas JS, nœuds DOM.", type: "sub" },
     { k: "dev_modules.storage", t: "Cookies et stockage", d: "Voir, modifier et supprimer cookies, localStorage et sessionStorage.", type: "sub" },
-    { k: "dev_modules.responsive", t: "Responsive et réseau", d: "Tailles d'appareils, 3G/4G/hors ligne, changement d'environnement.", type: "sub" },
-    { k: "dev_modules.tools", t: "Outils", d: "JWT, Base64, URL, JSON, timestamp, UUID — aussi dans F2.", type: "sub" },
+    { k: "dev_modules.tools", t: "Outils", d: "JWT, Base64, URL, JSON, timestamp, UUID, changement d'environnement — aussi dans F2. Le responsive et le réseau lent sont dans les DevTools (Ctrl+Maj+M).", type: "sub" },
     { k: "dev_modules.containers", t: "Conteneurs de session", d: "Onglets aux cookies isolés : connectez-vous en dev et en prod en même temps.", type: "sub" },
     { h: "Configuration" },
     { k: "dev_envs", t: "Environnements", d: "Un hôte par ligne, par ex. localhost:3000, staging.monapp.fr, monapp.fr.", type: "textarea" },

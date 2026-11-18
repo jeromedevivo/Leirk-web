@@ -110,12 +110,25 @@ impl Shared {
 }
 
 impl App {
-    fn dev_send(&self, kind: &str, data: Value) {
-        self.js(&format!("L.dev({},{})", json!(kind), data));
+    /// The tab a developer command is about: the one inspected by the DevTools tab, else the active one.
+    pub(crate) fn dev_tab(&self) -> TabId {
+        self.dev_target.unwrap_or(self.tabs.active)
+    }
+
+    /// Queues a result for the DevTools "Leirk" tab (it polls the loopback API).
+    pub(crate) fn dev_out(&mut self, kind: &str, data: Value) {
+        if self.outbox.len() >= 200 {
+            self.outbox.remove(0);
+        }
+        self.outbox.push(json!([kind, data]));
+    }
+
+    fn dev_send(&mut self, kind: &str, data: Value) {
+        self.dev_out(kind, data);
     }
 
     fn active_core(&self) -> Option<ICoreWebView2> {
-        self.views.get(&self.tabs.active).map(|v| v.webview())
+        self.views.get(&self.dev_tab()).map(|v| v.webview())
     }
 
     /// Per-webview developer hooks: response log and JS errors (only when their module is on).
@@ -295,7 +308,7 @@ impl App {
     /// viewport as tall as the document so every element counts as visible, and capture it in stitched slices.
     pub(crate) fn capture_full(&self) {
         let Some(core) = self.active_core() else { return self.js("toast('Ouvrez une page à capturer.')") };
-        let host = host(&self.tabs.get(self.tabs.active).map(|t| t.url.clone()).unwrap_or_default()).replace('.', "-");
+        let host = host(&self.tabs.get(self.dev_tab()).map(|t| t.url.clone()).unwrap_or_default()).replace('.', "-");
         let proxy = self.proxy.clone();
         self.js("toast('Capture en cours… la page défile pour tout charger.')");
         const PRELOAD: &str = "(async()=>{const d=document.scrollingElement||document.documentElement;const w=t=>new Promise(r=>setTimeout(r,t));let y=0;for(let i=0;i<120&&y<d.scrollHeight;i++){y+=innerHeight*0.85;scrollTo(0,y);await w(140)}scrollTo(0,0);await w(400);return 1})()";
@@ -376,8 +389,8 @@ impl App {
             return self.load_tech_db();
         };
         let Some(core) = self.active_core() else { return self.dev_send("tech", json!({"found": []})) };
-        let url = self.tabs.get(self.tabs.active).map(|t| t.url.clone()).unwrap_or_default();
-        let headers = self.shared.doc_headers.borrow().get(&self.tabs.active).cloned().unwrap_or_default();
+        let url = self.tabs.get(self.dev_tab()).map(|t| t.url.clone()).unwrap_or_default();
+        let headers = self.shared.doc_headers.borrow().get(&self.dev_tab()).cloned().unwrap_or_default();
         let expr = format!(
             "(()=>{{const K={},D={};const js=[];for(const k of K){{try{{let o=window;for(const p of k.split('.')){{if(o==null)throw 0;o=o[p]}}if(o!==undefined&&o!==null)js.push([k,(typeof o==='string'||typeof o==='number')?String(o):''])}}catch(e){{}}}}\
              const dom=[];for(const s of D){{try{{if(document.querySelector(s))dom.push(s)}}catch(e){{}}}}\
@@ -439,7 +452,7 @@ impl App {
     pub(crate) fn dev_command(&mut self, c: &str, v: &Value) -> bool {
         let proxy = self.proxy.clone();
         let core = self.active_core();
-        let url = self.tabs.get(self.tabs.active).map(|t| t.url.clone()).unwrap_or_default();
+        let url = self.tabs.get(self.dev_tab()).map(|t| t.url.clone()).unwrap_or_default();
         match c {
             "devDocker" => {
                 std::thread::spawn(move || {
@@ -479,21 +492,21 @@ impl App {
                 });
             }
             "devNet" => {
-                let log: Vec<Value> = self.shared.netlog.borrow().get(&self.tabs.active).map(|l| l.iter().cloned().collect()).unwrap_or_default();
-                self.dev_send("network", Value::Array(log));
+                let log: Vec<Value> = self.shared.netlog.borrow().get(&self.dev_tab()).map(|l| l.iter().cloned().collect()).unwrap_or_default();
+                self.dev_out("network", Value::Array(log));
             }
-            "devNetClear" => drop(self.shared.netlog.borrow_mut().remove(&self.tabs.active)),
+            "devNetClear" => drop(self.shared.netlog.borrow_mut().remove(&self.dev_tab())),
             "devReplay" => {
-                if let Some(view) = self.views.get(&self.tabs.active) {
+                if let Some(view) = self.views.get(&self.dev_tab()) {
                     let js = format!("fetch({},{{method:{},credentials:'include'}}).then(r=>console.log('[Leirk] rejoué',r.status,r.url))", json!(v["u"]), json!(v["m"]));
                     let _ = view.evaluate_script(&js);
                 }
             }
             "devErrors" => {
-                let errs = self.shared.errors.borrow().get(&self.tabs.active).cloned().unwrap_or_default();
-                self.dev_send("errors", Value::Array(errs));
+                let errs = self.shared.errors.borrow().get(&self.dev_tab()).cloned().unwrap_or_default();
+                self.dev_out("errors", Value::Array(errs));
             }
-            "devErrorsClear" => drop(self.shared.errors.borrow_mut().remove(&self.tabs.active)),
+            "devErrorsClear" => drop(self.shared.errors.borrow_mut().remove(&self.dev_tab())),
             "devTech" => self.tech_detect(),
             "devPerf" => self.perf(),
             "devCookies" => {
@@ -521,7 +534,7 @@ impl App {
                 }
             }
             "devStorageSet" | "devStorageDel" => {
-                if let Some(view) = self.views.get(&self.tabs.active) {
+                if let Some(view) = self.views.get(&self.dev_tab()) {
                     let area = if v["area"] == "session" { "sessionStorage" } else { "localStorage" };
                     let js = if c == "devStorageSet" { format!("{area}.setItem({},{})", json!(v["k"]), json!(v["v"])) } else { format!("{area}.removeItem({})", json!(v["k"])) };
                     let _ = view.evaluate_script(&js);
@@ -564,7 +577,7 @@ impl App {
                 let thumb = self.thumbs.get(&id).cloned();
                 let loaded = self.views.contains_key(&id);
                 if !loaded {
-                    self.dev_send("tabInfo", json!({"id": id, "mb": 0, "thumb": thumb}));
+                    self.js(&format!("L.dev('tabInfo',{})", json!({"id": id, "mb": 0, "thumb": thumb})));
                 } else {
                     self.tab_memory(move |mem| {
                         let _ = proxy.send_event(Ev::Dev("tabInfo".into(), json!({"id": id, "mb": mem.get(&id).map(|b| b / 1_048_576), "thumb": thumb})));

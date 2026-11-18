@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "Leirk",
+  "version": "1.0",
+  "description": "Outils développeur de Leirk dans les DevTools",
+  "devtools_page": "devtools.html"
+}

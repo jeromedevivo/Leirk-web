@@ -33,6 +33,7 @@ use wry::{
     WebViewExtWindows,
 };
 
+mod devapi;
 mod devhost;
 mod panels;
 mod synchost;
@@ -61,6 +62,10 @@ enum Ev {
     Repaint,
     /// A side panel's icon, remembered like a site's icon.
     SiteIcon(String, String),
+    /// A command from the DevTools "Leirk" tab: (command, argument, inspected-tab nonce, reply channel).
+    DevApi(String, Value, String, std::sync::mpsc::Sender<Value>),
+    /// A page announced which DevTools nonce inspects it.
+    DevHello(String, TabId),
 }
 
 const TICK: Duration = Duration::from_secs(30);
@@ -99,6 +104,24 @@ fn shortcut(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'static str>
         (false, false, false, 0x75) => "focus",   // F6
         _ => return None,
     })
+}
+
+/// Leirk's developer tools ship as a DevTools extension: they appear in F12, never in the regular interface.
+fn write_devtools_extension(dir: &Path) -> PathBuf {
+    let root = dir.join("extensions");
+    let ext = root.join("leirk-devtools");
+    let _ = std::fs::create_dir_all(&ext);
+    for (name, body) in [
+        ("manifest.json", include_str!("../ui/devtools/manifest.json")),
+        ("devtools.html", include_str!("../ui/devtools/devtools.html")),
+        ("devtools.js", include_str!("../ui/devtools/devtools.js")),
+        ("panel.html", include_str!("../ui/devtools/panel.html")),
+        ("panel.js", include_str!("../ui/devtools/panel.js")),
+        ("panel.css", include_str!("../ui/devtools/panel.css")),
+    ] {
+        let _ = std::fs::write(ext.join(name), body);
+    }
+    root
 }
 
 /// Window and taskbar icon, decoded from the shipped PNG.
@@ -317,6 +340,11 @@ struct App {
     sync_devices: Vec<Value>,
     last_sync: u64,
     last_gesture: Instant,
+    /// The tab the DevTools request is about (None: the active tab).
+    dev_target: Option<TabId>,
+    dev_nonces: HashMap<String, TabId>,
+    /// Developer results waiting for the DevTools tab to collect them.
+    outbox: Vec<Value>,
 }
 
 impl App {
@@ -439,6 +467,7 @@ impl App {
         }
         let built = builder
             .with_additional_browser_args(&self.args)
+            .with_browser_extensions_enabled(true)
             .with_url(&url)
             .with_incognito(private)
             .with_visible(false)
@@ -450,6 +479,7 @@ impl App {
                     "F2" => Ev::Key("palette"),
                     "F6" => Ev::Key("focus"),
                     b if b.starts_with("g:") && b.len() < 12 => Ev::Gesture(id, b[2..].to_string()),
+                    b if b.starts_with("devhello:") && b.len() < 80 => Ev::DevHello(b[9..].to_string(), id),
                     b if b.starts_with("c:") => {
                         let Ok(v) = serde_json::from_str::<Value>(&b[2..]) else { return };
                         let list = |k: &str| -> Vec<String> {
@@ -1402,7 +1432,49 @@ impl App {
                 return;
             }
             Ev::Navigate(id, url) => return self.navigate_tab(id, url),
+            Ev::DevHello(nonce, id) => {
+                if self.dev_nonces.len() >= 64 {
+                    self.dev_nonces.clear();
+                }
+                self.dev_nonces.insert(nonce, id);
+                return;
+            }
+            Ev::DevApi(c, v, nonce, reply) => {
+                self.dev_target = self.dev_nonces.get(&nonce).copied().filter(|t| self.tabs.get(*t).is_some());
+                let dev = self.pref_on("dev_mode");
+                if dev {
+                    match c.as_str() {
+                        "devJs" => {
+                            // toggle scripts for the inspected tab's site
+                            let (prev, target) = (self.tabs.active, self.dev_tab());
+                            self.tabs.active = target;
+                            self.command("noscript", &Value::Null);
+                            self.tabs.active = prev;
+                            self.push();
+                        }
+                        "open" => {
+                            if let Some(u) = v.as_str().filter(|u| is_web_url(u)) {
+                                self.new_tab(u, false, false);
+                            }
+                        }
+                        c if c.starts_with("dev") => drop(self.dev_command(c, &v)),
+                        _ => {}
+                    }
+                }
+                let url = self.tabs.get(self.dev_tab()).map(|t| t.url.clone()).unwrap_or_default();
+                let prefs = self.shared.prefs.borrow().clone();
+                let _ = reply.send(json!({"outbox": std::mem::take(&mut self.outbox), "dev": dev, "modules": prefs["dev_modules"],
+                    "envs": prefs["dev_envs"], "noscript": self.shared.noscript(&url), "url": url}));
+                self.dev_target = None;
+                return;
+            }
             Ev::Dev(kind, data) => {
+                if !matches!(kind.as_str(), "capture" | "tabInfo") {
+                    if kind == "dockerAct" {
+                        return self.command("devDocker", &Value::Null);
+                    }
+                    return self.dev_out(&kind, data);
+                }
                 if kind == "dockerAct" {
                     return self.command("devDocker", &Value::Null);
                 }
@@ -1565,9 +1637,15 @@ fn main() {
         .expect("window");
 
     let mut ctx = WebContext::new(Some(dir.join("WebView2")));
+    let extensions = write_devtools_extension(&dir);
+    if let Some(api) = devapi::DevApi::start(proxy.clone()) {
+        devapi::write_config(&extensions.join("leirk-devtools"), &api);
+    }
     let p = proxy.clone();
     let ui = WebViewBuilder::new_with_web_context(&mut ctx)
         .with_additional_browser_args(&args)
+        .with_browser_extensions_enabled(true)
+        .with_extensions_path(extensions)
         .with_html(
             include_str!("../ui/index.html")
                 .replace("<!--EXTRA-->", concat!("<script>", include_str!("../ui/extra.js"), "</script>"))
@@ -1658,6 +1736,9 @@ fn main() {
         sync_devices: vec![],
         last_sync: 0,
         last_gesture: Instant::now(),
+        dev_target: None,
+        dev_nonces: HashMap::new(),
+        outbox: vec![],
     };
     unsafe {
         let _ = app.hook_keys(&app.ui.controller());

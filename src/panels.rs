@@ -145,6 +145,7 @@ impl App {
             let p = self.proxy.clone();
             let built = WebViewBuilder::new_with_web_context(&mut self.ctx)
                 .with_additional_browser_args(&self.args)
+                .with_browser_extensions_enabled(true)
                 .with_url(url)
                 .with_visible(false)
                 .with_new_window_req_handler(move |u, _| {
