@@ -223,13 +223,8 @@ window.tabMenuExtra = id => {
   return mod("containers") && t?.url ? ["-", ...names.map(n => ["stack", `Rouvrir dans le conteneur « ${n} »`, () => send("openContainer", { name: n, url: t.url })])] : [];
 };
 
-/* ---------- JS toggle button and per-state refresh ---------- */
-$("#jsbtn").onclick = () => { toast(S.shields.noscript ? "JavaScript réactivé sur ce site" : "JavaScript coupé sur ce site"); send("noscript"); };
+/* ---------- per-state refresh ---------- */
 window.renderExtras = function () {
-  const b = $("#jsbtn");
-  b.hidden = !(mod("js") && S.url);
-  b.classList.toggle("off", !!S.shields.noscript);
-  b.title = S.shields.noscript ? "JavaScript coupé sur ce site — cliquer pour réactiver" : "Couper JavaScript sur ce site";
   if (sidePanel && sidePanel !== "dev" && !panels().some(p => p.id === sidePanel)) sidePanel = null;
   refreshCommands();
   renderPanelBar();
@@ -246,15 +241,13 @@ SECTIONS.splice(SECTIONS.findIndex(s => s.id === "import"), 0,
   { id: "dev", icon: "code", title: "Mode développeur", items: [
     { k: "dev_mode", t: "Activer le mode développeur", d: "Les outils apparaissent dans les DevTools (F12) › onglet « Leirk ». Rien n'est visible dans l'interface pour les autres utilisateurs ; désactivé, rien ne tourne en arrière-plan.", type: "toggle" },
     { h: "Modules" },
-    { k: "dev_modules.js", t: "JavaScript en un clic", d: "Bouton JS dans la barre d'outils pour couper ou réactiver les scripts du site.", type: "sub" },
+    { k: "dev_modules.js", t: "JavaScript en un clic", d: "Bouton JS dans l'onglet Leirk des DevTools pour couper ou réactiver les scripts du site.", type: "sub" },
     { k: "dev_modules.tech", t: "Technologies (Wappalyzer)", d: "Frameworks, CMS, serveurs, analytics… avec leurs versions.", type: "sub" },
-    { k: "dev_modules.network", t: "Journal réseau", d: "Requêtes de l'onglet, statuts, tailles ; copier en cURL et rejouer.", type: "sub" },
-    { k: "dev_modules.errors", t: "Erreurs JavaScript", d: "Pastille rouge sur l'onglet et liste des exceptions.", type: "sub" },
-    { k: "dev_modules.docker", t: "Docker", d: "Conteneurs, ports cliquables, CPU et RAM, logs, démarrer et arrêter.", type: "sub" },
-    { k: "dev_modules.ports", t: "Ports locaux", d: "Serveurs en écoute sur ce PC (vite, node, postgres…).", type: "sub" },
-    { k: "dev_modules.perf", t: "Performances", d: "RAM par onglet, Web Vitals, tas JS, nœuds DOM.", type: "sub" },
-    { k: "dev_modules.storage", t: "Cookies et stockage", d: "Voir, modifier et supprimer cookies, localStorage et sessionStorage.", type: "sub" },
-    { k: "dev_modules.tools", t: "Outils", d: "JWT, Base64, URL, JSON, timestamp, UUID, changement d'environnement — aussi dans F2. Le responsive et le réseau lent sont dans les DevTools (Ctrl+Maj+M).", type: "sub" },
+    { k: "dev_modules.errors", t: "Pastille d'erreurs JavaScript", d: "Point rouge sur l'onglet et nombre d'erreurs dans l'aperçu au survol. Le détail est dans la Console.", type: "sub" },
+    { k: "dev_modules.docker", t: "Docker", d: "Projets Compose puis leurs conteneurs : tout démarrer ou arrêter d'un clic, ports cliquables, CPU et RAM, logs.", type: "sub" },
+    { k: "dev_modules.ports", t: "Ports locaux", d: "Serveurs web en écoute sur ce PC (vite, node, IIS…), ouvrables d'un clic.", type: "sub" },
+    { k: "dev_modules.tools", t: "Outils", d: "Décoder un JWT, Base64, encodage d'URL, JSON, timestamp, identifiant unique, changement d'environnement — aussi dans F2.", type: "sub" },
+    { k: "dev_modules.responsive", t: "Responsive", d: "Bouton téléphone en tête de l'onglet Leirk : affiche la page aux tailles iPhone, Android, iPad…", type: "sub" },
     { k: "dev_modules.containers", t: "Conteneurs de session", d: "Onglets aux cookies isolés : connectez-vous en dev et en prod en même temps.", type: "sub" },
     { h: "Configuration" },
     { k: "dev_envs", t: "Environnements", d: "Un hôte par ligne, par ex. localhost:3000, staging.monapp.fr, monapp.fr.", type: "textarea" },

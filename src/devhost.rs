@@ -1,7 +1,7 @@
 //! Developer mode (Docker, ports, network, JS errors, technologies, performance, storage, responsive),
 //! per-tab memory for hover cards, and full-page capture. Everything here is off unless the user enables it.
 use super::*;
-use leirk::devtools::{parse_docker, parse_ports};
+use leirk::devtools::{parse_docker, parse_ports, speaks_http};
 use leirk::tech::{Db, Signals};
 use std::sync::Arc;
 use windows::Win32::Foundation::{CloseHandle, FILETIME};
@@ -139,8 +139,7 @@ impl App {
             c2.add_WebResourceResponseReceived(
                 &WebResourceResponseReceivedEventHandler::create(Box::new(move |sender, args| {
                     let Some(args) = args else { return Ok(()) };
-                    let (net, tech) = (shared.dev("network"), shared.dev("tech"));
-                    if !net && !tech {
+                    if !shared.dev("tech") {
                         return Ok(());
                     }
                     let url = pwstr(|p| args.Request()?.Uri(p));
@@ -158,19 +157,8 @@ impl App {
                             let _ = it.MoveNext(&mut has);
                         }
                     }
-                    if tech && sender.is_some_and(|s| pwstr(|p| s.Source(p)) == url) {
+                    if sender.is_some_and(|s| pwstr(|p| s.Source(p)) == url) {
                         shared.doc_headers.borrow_mut().insert(id, headers.clone());
-                    }
-                    if net {
-                        let size = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("content-length")).and_then(|(_, v)| v.parse::<u64>().ok());
-                        let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-                        if let Some(log) = shared.netlog.borrow_mut().get_mut(&id) {
-                            if let Some(e) = log.iter_mut().rev().find(|e| e["u"] == url.as_str() && e["s"] == 0) {
-                                e["s"] = json!(status);
-                                e["z"] = json!(size);
-                                e["d"] = json!(now_ms.saturating_sub(e["ts"].as_u64().unwrap_or(now_ms)));
-                            }
-                        }
                     }
                     Ok(())
                 })),
@@ -414,45 +402,11 @@ impl App {
         });
     }
 
-    /// RAM and CPU of every loaded tab, plus page metrics and Web Vitals of the active one.
-    fn perf(&mut self) {
-        let proxy = self.proxy.clone();
-        let titles: HashMap<TabId, String> = self.tabs.list.iter().map(|t| (t.id, if t.title.is_empty() { t.url.clone() } else { t.title.clone() })).collect();
-        self.tab_memory(move |mem| {
-            let mut rows: Vec<Value> = mem.iter().map(|(id, b)| json!({"id": id, "title": titles.get(id), "mb": b / 1_048_576})).collect();
-            rows.sort_by_key(|r| std::cmp::Reverse(r["mb"].as_u64().unwrap_or(0)));
-            let _ = proxy.send_event(Ev::Dev("perfTabs".into(), Value::Array(rows)));
-        });
-        let (mem, cpu) = proc_usage(std::process::id());
-        let prev = self.cpu_prev.replace((cpu, Instant::now()));
-        let cpu_pct = prev.map(|(c, t)| (cpu.saturating_sub(c)) as f64 / 1e4 / t.elapsed().as_millis().max(1) as f64 * 100.0).unwrap_or(0.0);
-        self.dev_send("perfApp", json!({"mb": mem / 1_048_576, "cpu": (cpu_pct * 10.0).round() / 10.0}));
-        let Some(core) = self.active_core() else { return };
-        let proxy = self.proxy.clone();
-        let c2 = core.clone();
-        cdp(&core, "Performance.enable", json!({}), move |_| {
-            cdp(&c2, "Performance.getMetrics", json!({}), move |m| {
-                let metrics: serde_json::Map<String, Value> = m.and_then(|m| m["metrics"].as_array().cloned()).unwrap_or_default().into_iter()
-                    .filter_map(|x| Some((x["name"].as_str()?.to_string(), x["value"].clone()))).collect();
-                let _ = proxy.send_event(Ev::Dev("perfMetrics".into(), Value::Object(metrics)));
-            });
-        });
-        const VITALS: &str = "(async()=>{const get=t=>new Promise(r=>{try{new PerformanceObserver((l,o)=>{o.disconnect();r(l.getEntries())}).observe({type:t,buffered:true});setTimeout(()=>r([]),300)}catch(e){r([])}});\
-            const lcp=(await get('largest-contentful-paint')).pop();const cls=(await get('layout-shift')).filter(e=>!e.hadRecentInput).reduce((a,e)=>a+e.value,0);\
-            const nav=performance.getEntriesByType('navigation')[0]||{};const fcp=performance.getEntriesByName('first-contentful-paint')[0];\
-            return{lcp:lcp?Math.round(lcp.startTime):null,cls:Math.round(cls*1000)/1000,fcp:fcp?Math.round(fcp.startTime):null,ttfb:nav.responseStart?Math.round(nav.responseStart):null,\
-            load:nav.loadEventEnd?Math.round(nav.loadEventEnd):null,nodes:document.getElementsByTagName('*').length,transfer:performance.getEntriesByType('resource').reduce((a,e)=>a+(e.transferSize||0),0)}})()";
-        let proxy = self.proxy.clone();
-        evaluate(&core, VITALS, move |v| {
-            let _ = proxy.send_event(Ev::Dev("vitals".into(), v.unwrap_or_default()));
-        });
-    }
 
     /// Developer-mode commands from the chrome; returns false for anything else.
     pub(crate) fn dev_command(&mut self, c: &str, v: &Value) -> bool {
         let proxy = self.proxy.clone();
         let core = self.active_core();
-        let url = self.tabs.get(self.dev_tab()).map(|t| t.url.clone()).unwrap_or_default();
         match c {
             "devDocker" => {
                 std::thread::spawn(move || {
@@ -467,10 +421,14 @@ impl App {
                 });
             }
             "devDockerAct" => {
-                let (id, act) = (v["id"].as_str().unwrap_or("").to_string(), v["act"].as_str().unwrap_or("").to_string());
-                if ["start", "stop", "restart"].contains(&act.as_str()) && id.chars().all(|c| c.is_ascii_alphanumeric()) {
+                let (ids, act) = (v["id"].as_str().unwrap_or("").to_string(), v["act"].as_str().unwrap_or("").to_string());
+                let ids: Vec<String> = ids.split_whitespace().map(String::from).collect();
+                let valid = !ids.is_empty() && ids.len() <= 64 && ids.iter().all(|id| id.chars().all(|c| c.is_ascii_alphanumeric()));
+                if ["start", "stop", "restart"].contains(&act.as_str()) && valid {
                     std::thread::spawn(move || {
-                        let r = run("docker", &[&act, &id]);
+                        let mut args = vec![act.as_str()];
+                        args.extend(ids.iter().map(String::as_str));
+                        let r = run("docker", &args);
                         let _ = proxy.send_event(Ev::Dev("dockerAct".into(), json!({"ok": r.is_ok(), "error": r.err()})));
                     });
                 }
@@ -487,59 +445,18 @@ impl App {
             "devPorts" => {
                 std::thread::spawn(move || {
                     let (netstat, tasklist) = (system_tool("netstat.exe"), system_tool("tasklist.exe"));
-                    let ports = parse_ports(&run(&netstat.to_string_lossy(), &["-ano", "-p", "tcp"]).unwrap_or_default(), &run(&tasklist.to_string_lossy(), &["/fo", "csv", "/nh"]).unwrap_or_default());
+                    let all = parse_ports(&run(&netstat.to_string_lossy(), &["-ano", "-p", "tcp"]).unwrap_or_default(), &run(&tasklist.to_string_lossy(), &["/fo", "csv", "/nh"]).unwrap_or_default());
+                    // keep what answers HTTP, probed in parallel; Leirk's own DevTools bridge is not a site
+                    let me = std::process::id();
+                    let web: Vec<bool> = std::thread::scope(|sc| {
+                        let probes: Vec<_> = all.iter().map(|p| sc.spawn(move || p.pid != me && speaks_http(p.port))).collect();
+                        probes.into_iter().map(|h| h.join().unwrap_or(false)).collect()
+                    });
+                    let ports: Vec<_> = all.into_iter().zip(web).filter(|(_, w)| *w).map(|(p, _)| p).collect();
                     let _ = proxy.send_event(Ev::Dev("ports".into(), json!(ports)));
                 });
             }
-            "devNet" => {
-                let log: Vec<Value> = self.shared.netlog.borrow().get(&self.dev_tab()).map(|l| l.iter().cloned().collect()).unwrap_or_default();
-                self.dev_out("network", Value::Array(log));
-            }
-            "devNetClear" => drop(self.shared.netlog.borrow_mut().remove(&self.dev_tab())),
-            "devReplay" => {
-                if let Some(view) = self.views.get(&self.dev_tab()) {
-                    let js = format!("fetch({},{{method:{},credentials:'include'}}).then(r=>console.log('[Leirk] rejoué',r.status,r.url))", json!(v["u"]), json!(v["m"]));
-                    let _ = view.evaluate_script(&js);
-                }
-            }
-            "devErrors" => {
-                let errs = self.shared.errors.borrow().get(&self.dev_tab()).cloned().unwrap_or_default();
-                self.dev_out("errors", Value::Array(errs));
-            }
-            "devErrorsClear" => drop(self.shared.errors.borrow_mut().remove(&self.dev_tab())),
             "devTech" => self.tech_detect(),
-            "devPerf" => self.perf(),
-            "devCookies" => {
-                if let Some(core) = core {
-                    cdp(&core, "Network.getCookies", json!({"urls": [url]}), move |r| {
-                        let _ = proxy.send_event(Ev::Dev("cookies".into(), r.map(|r| r["cookies"].clone()).unwrap_or(json!([]))));
-                    });
-                }
-            }
-            "devCookieDel" => {
-                if let Some(core) = core {
-                    cdp(&core, "Network.deleteCookies", json!({"name": v["name"], "domain": v["domain"], "path": v["path"]}), |_| {});
-                }
-            }
-            "devCookieSet" => {
-                if let Some(core) = core {
-                    cdp(&core, "Network.setCookie", json!({"name": v["name"], "value": v["value"], "domain": v["domain"], "path": v["path"], "url": url}), |_| {});
-                }
-            }
-            "devStorage" => {
-                if let Some(core) = core {
-                    evaluate(&core, "(()=>{try{return{local:Object.entries(localStorage),session:Object.entries(sessionStorage)}}catch(e){return{local:[],session:[]}}})()", move |r| {
-                        let _ = proxy.send_event(Ev::Dev("storage".into(), r.unwrap_or_default()));
-                    });
-                }
-            }
-            "devStorageSet" | "devStorageDel" => {
-                if let Some(view) = self.views.get(&self.dev_tab()) {
-                    let area = if v["area"] == "session" { "sessionStorage" } else { "localStorage" };
-                    let js = if c == "devStorageSet" { format!("{area}.setItem({},{})", json!(v["k"]), json!(v["v"])) } else { format!("{area}.removeItem({})", json!(v["k"])) };
-                    let _ = view.evaluate_script(&js);
-                }
-            }
             "devDevice" => {
                 if let Some(core) = core {
                     if v.is_null() {
@@ -550,20 +467,6 @@ impl App {
                         cdp(&core, "Emulation.setDeviceMetricsOverride", json!({"width": v["w"], "height": v["h"], "deviceScaleFactor": v["dpr"], "mobile": mobile}), |_| {});
                         cdp(&core, "Emulation.setTouchEmulationEnabled", json!({"enabled": mobile, "maxTouchPoints": 5}), |_| {});
                     }
-                }
-            }
-            "devThrottle" => {
-                if let Some(core) = core {
-                    let (off, lat, down, up) = match v.as_str().unwrap_or("") {
-                        "offline" => (true, 0, 0, 0),
-                        "3g" => (false, 300, 50_000, 50_000),
-                        "4g" => (false, 70, 1_200_000, 600_000),
-                        _ => (false, 0, -1, -1),
-                    };
-                    let c2 = core.clone();
-                    cdp(&core, "Network.enable", json!({}), move |_| {
-                        cdp(&c2, "Network.emulateNetworkConditions", json!({"offline": off, "latency": lat, "downloadThroughput": down, "uploadThroughput": up}), |_| {});
-                    });
                 }
             }
             "devErrorsWatch" => {

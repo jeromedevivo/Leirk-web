@@ -13,6 +13,9 @@ pub struct Container {
     pub ports: Vec<u16>,
     pub cpu: String,
     pub mem: String,
+    /// Docker Compose project and service (empty for a standalone container).
+    pub project: String,
+    pub service: String,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -43,7 +46,10 @@ pub fn parse_docker(ps: &str, stats: &str) -> Vec<Container> {
                 }
             }
             let (cpu, mem) = usage.get(&id).cloned().unwrap_or_default();
-            Container { name: field(v, "Names"), image: field(v, "Image"), state: field(v, "State"), status: field(v, "Status"), ports, cpu, mem, id }
+            let labels = field(v, "Labels");
+            let label = |k: &str| labels.split(',').find_map(|l| l.strip_prefix(k)?.strip_prefix('=')).unwrap_or("").to_string();
+            let (project, service) = (label("com.docker.compose.project"), label("com.docker.compose.service"));
+            Container { name: field(v, "Names"), image: field(v, "Image"), state: field(v, "State"), status: field(v, "Status"), ports, cpu, mem, id, project, service }
         })
         .collect()
 }
@@ -72,6 +78,21 @@ pub fn parse_ports(netstat: &str, tasklist: &str) -> Vec<Port> {
     out
 }
 
+/// True when localhost:`port` serves a site: an HTTP answer to "/" that is not an error page.
+/// Databases do not speak HTTP; app RPC ports and Windows services answer "/" with 404 or 503.
+pub fn speaks_http(port: u16) -> bool {
+    use std::io::{Read, Write};
+    let t = std::time::Duration::from_millis(400);
+    let Ok(mut s) = std::net::TcpStream::connect_timeout(&(std::net::Ipv4Addr::LOCALHOST, port).into(), t) else { return false };
+    let _ = (s.set_read_timeout(Some(t)), s.set_write_timeout(Some(t)));
+    let mut buf = [0u8; 12]; // "HTTP/1.1 200"
+    if s.write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n").is_err() || s.read_exact(&mut buf).is_err() || !buf.starts_with(b"HTTP/") {
+        return false;
+    }
+    let code: u16 = std::str::from_utf8(&buf[9..12]).ok().and_then(|c| c.parse().ok()).unwrap_or(0);
+    (200..400).contains(&code) || code == 401 || code == 403
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +111,43 @@ not json"#;
         assert_eq!(c[0].mem, "12.5MiB");
         assert_eq!(c[1].state, "exited");
         assert!(c[1].ports.is_empty());
+    }
+
+    #[test]
+    fn compose_project_and_service_from_labels() {
+        let ps = r#"{"ID":"e5","Names":"shop-api-1","Image":"node:20","State":"running","Status":"Up","Ports":"","Labels":"com.docker.compose.project=shop,com.docker.compose.service=api,maintainer=x"}
+{"ID":"f6","Names":"lonely","Image":"redis","State":"exited","Status":"Exited","Ports":"","Labels":""}"#;
+        let c = parse_docker(ps, "");
+        assert_eq!((c[0].project.as_str(), c[0].service.as_str()), ("shop", "api"));
+        assert_eq!((c[1].project.as_str(), c[1].service.as_str()), ("", ""));
+    }
+
+    #[test]
+    fn only_ports_that_answer_http_are_web() {
+        use std::io::{Read, Write};
+        let web = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let raw = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let (wp, rp) = (web.local_addr().unwrap().port(), raw.local_addr().unwrap().port());
+        std::thread::spawn(move || {
+            let (mut s, _) = web.accept().unwrap();
+            let _ = s.read(&mut [0u8; 256]);
+            let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        });
+        std::thread::spawn(move || {
+            let (mut s, _) = raw.accept().unwrap();
+            let _ = s.write_all(b"\x00\x00\x00\x0aN"); // e.g. a database greeting
+        });
+        // an app's local RPC answers HTTP too, but 404 on "/": not a site
+        let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let ap = api.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut s, _) = api.accept().unwrap();
+            let _ = s.read(&mut [0u8; 256]);
+            let _ = s.write_all(b"HTTP/1.1 404 Not Found\r\n\r\n");
+        });
+        assert!(speaks_http(wp));
+        assert!(!speaks_http(rp));
+        assert!(!speaks_http(ap));
     }
 
     #[test]

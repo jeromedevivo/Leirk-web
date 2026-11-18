@@ -377,8 +377,6 @@ html[data-blank] #ntp { display: block; }
 /* Tab extras */
 .tab.ct { box-shadow: inset 0 -2px 0 var(--ct); }
 .errdot { width: 7px; height: 7px; border-radius: 50%; background: oklch(0.62 0.22 25); flex: none; }
-#jsbtn { width: 34px; font: 700 11px var(--font); letter-spacing: .02em; color: var(--ink-2); }
-#jsbtn.off { color: oklch(0.6 0.2 25); text-decoration: line-through; text-decoration-thickness: 2px; }
 /* Developer panel */
 .devnav { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px; border-bottom: 1px solid var(--line); flex: none; }
 .devnav button { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 7px; color: var(--ink-2); font-size: 12px; }
@@ -496,7 +494,6 @@ pre.logs { max-height: 320px; overflow: auto; margin: 8px 0 0; padding: 8px; bor
           <button class="icon" id="star" title="Ajouter aux favoris (Ctrl+D)" aria-label="Favori"><svg><use href="#i-star"/></svg></button>
         </div>
       </div>
-      <button class="icon" id="jsbtn" hidden aria-label="JavaScript sur ce site">JS</button>
       <button class="icon" id="shield" title="Shields" aria-label="Shields"><svg><use href="#i-shield"/></svg><span class="count" hidden></span></button>
       <button class="icon" id="menubtn" title="Menu" aria-label="Menu"><svg><use href="#i-menu"/></svg></button>
     </div>
@@ -785,7 +782,13 @@ function tabMenu(id, x, y) {
     next && t.stack == null && ["stack", "Empiler avec l'onglet suivant", () => send("stack", { id: next.id, onto: id })],
     t.stack != null && ["stack", "Retirer de la pile", () => send("unstack", id)],
     ["pin", t.pinned ? "Détacher l'onglet" : "Épingler l'onglet", () => send("pin", id)],
-    t.loaded && id !== S.active && ["moon", "Décharger de la mémoire", () => send("unload", id)],
+    t.loaded && t.url && (id !== S.active || S.tabs.length > 1) && ["moon", "Décharger de la mémoire", () => {
+      // the tab on screen is unloaded once another one is shown
+      const i = S.tabs.findIndex(m => m.id === id), other = S.tabs[i + 1] || S.tabs[i - 1];
+      if (id === S.active) { if (!other) return; send("activate", other.id); }
+      send("unload", id);
+    }],
+    S.tabs.length > 1 && ["moon", "Décharger les autres onglets", () => send("unloadOthers")],
     ...(window.tabMenuExtra ? tabMenuExtra(id) : []),
     "-",
     ["x", "Fermer l'onglet", () => closeTab(id), "Ctrl+W"],
@@ -983,7 +986,6 @@ const COMMANDS = [
   ["tile", "Mosaïque : onglets sélectionnés", () => { send("tile", [...sel].slice(0, 4)); sel.clear(); }, "Ctrl+clic", () => sel.size >= 2],
   ["tile", "Mosaïque avec l'onglet suivant", () => { const i = S.tabs.findIndex(t => t.id === S.active); send("tile", [S.active, S.tabs[i + 1].id]); }, "", () => !S.tiled.includes(S.active) && S.tabs.findIndex(t => t.id === S.active) < S.tabs.length - 1],
   ["tile", "Quitter la mosaïque", () => send("untile"), "", () => S.tiled.includes(S.active)],
-  ["moon", "Décharger les autres onglets", () => send("unloadOthers")],
   ["pin", "Épingler ou détacher l'onglet", () => send("pin")],
   ["stack", "Retirer l'onglet de sa pile", () => send("unstack"), "", () => S.tabs.find(t => t.id === S.active)?.stack != null],
   ["tabs", "Onglets verticaux / horizontaux", () => setPref("tabs_position", P("tabs_position") === "left" ? "top" : "left")],

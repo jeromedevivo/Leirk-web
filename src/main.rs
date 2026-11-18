@@ -267,7 +267,6 @@ struct Shared {
     upgraded: RefCell<HashMap<TabId, String>>,
     http_only: RefCell<HashSet<String>>,
     /// Developer mode: per-tab request log, JS errors, main document headers.
-    netlog: RefCell<HashMap<TabId, std::collections::VecDeque<Value>>>,
     errors: RefCell<HashMap<TabId, Vec<Value>>>,
     doc_headers: RefCell<HashMap<TabId, Vec<(String, String)>>>,
 }
@@ -329,7 +328,6 @@ struct App {
     quitting: bool,
     tech_db: Option<std::sync::Arc<leirk::tech::Db>>,
     tech_pending: bool,
-    cpu_prev: Option<(u64, Instant)>,
     thumbs: HashMap<TabId, String>,
     /// Side panel rect (logical px) and what it shows: "dev" or a panel id.
     side: (f64, f64, f64, f64),
@@ -559,15 +557,6 @@ impl App {
                         None => Verdict::Allow,
                     }
                 };
-                if shared.dev("network") {
-                    let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-                    let mut logs = shared.netlog.borrow_mut();
-                    let log = logs.entry(id).or_default();
-                    if log.len() >= 400 {
-                        log.pop_front();
-                    }
-                    log.push_back(json!({"u": url, "m": pwstr(|p| req.Method(p)), "t": resource_kind(ctx), "b": verdict != Verdict::Allow, "s": 0, "z": null, "d": null, "ts": ts}));
-                }
                 match verdict {
                     Verdict::Allow => {
                         if shared.on("gpc") {
@@ -1543,7 +1532,6 @@ impl App {
                     self.blocked.remove(&id);
                     // a new document starts: what the developer tools collected belongs to the old one
                     self.shared.errors.borrow_mut().remove(&id);
-                    self.shared.netlog.borrow_mut().remove(&id);
                     self.shared.doc_headers.borrow_mut().remove(&id);
                 }
             }
@@ -1705,7 +1693,6 @@ fn main() {
             doc_scripts: RefCell::new(HashMap::new()),
             upgraded: RefCell::new(HashMap::new()),
             http_only: RefCell::new(HashSet::new()),
-            netlog: RefCell::new(HashMap::new()),
             errors: RefCell::new(HashMap::new()),
             doc_headers: RefCell::new(HashMap::new()),
         }),
@@ -1726,7 +1713,6 @@ fn main() {
         quitting: false,
         tech_db: None,
         tech_pending: false,
-        cpu_prev: None,
         thumbs: HashMap::new(),
         side: (0.0, 0.0, 0.0, 0.0),
         panel_open: None,
