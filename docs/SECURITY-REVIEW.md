@@ -46,6 +46,11 @@ Pour afficher les vrais DevTools de Chromium dans la fenêtre (mode appareil, c�
 - **pages web exclues** : Chromium refuse toute connexion WebSocket dont l'origine n'est pas `devtools://devtools` (`--remote-allow-origins`), ainsi que les requêtes dont l'en-tête Host n'est pas une IP ou `localhost`, ce qui bloque le DNS rebinding ;
 - **risque accepté** : un programme déjà lancé sur ta session Windows peut piloter le navigateur pendant que Leirk tourne. Un tel programme pourrait de toute façon lire le profil sur le disque.
 
+## Nouvelle surface : les extensions
+- Installation uniquement à partir d'un identifiant ou d'un lien du Chrome Web Store (`chromewebstore.google.com`, `chrome.google.com/webstore`), téléchargé en HTTPS depuis le serveur de mise à jour de Google, avec redirections HTTPS seulement.
+- Suppression limitée à un dossier enfant direct du dossier `extensions`, jamais celui des DevTools de Leirk.
+- Une extension a les droits que son manifeste demande sur les pages, comme dans Chrome. N'installez que des extensions de confiance.
+
 ## Risques connus, acceptés ou à traiter plus tard
 - **Retour en HTTP après échec du HTTPS** (comportement standard de Brave) : un attaquant réseau qui bloque le port 443 obtient la version HTTP. Un mode strict pourra être ajouté.
 - **Ressources Brave (`resources.json`) et listes uBlock** : elles sont chargées depuis GitHub en HTTPS, sans signature vérifiée. On fait confiance aux mêmes sources que Brave.

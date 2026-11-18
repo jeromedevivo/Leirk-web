@@ -96,6 +96,12 @@ Twelve searchable sections with these highlights:
 - **Appearance and startup**: theme, accent and density, plus startup pages.
 - **Other sections**: shortcuts, mouse gestures, downloads, side panels (web apps, or Windows apps such as Teams and Spotify), import from every major browser, and **sync through OneDrive, Google Drive or any cloud folder**.
 
+### 🧩 Chrome extensions
+
+Paste a Chrome Web Store link into **Settings → Extensions** (Bitwarden, 1Password, Dark Reader…).
+Leirk downloads the official package, loads it on the spot, and gives it a toolbar button that opens
+its popup in the side panel. Content scripts such as password autofill run on every page.
+
 ### And also
 
 - **Import** bookmarks and history from Brave, Chrome, Edge, Vivaldi, Opera (GX), Chromium, Yandex, Firefox, Zen, LibreWolf, Floorp and Waterfox, all profiles included.
@@ -168,7 +174,7 @@ The UI is one WebView2 covering the window; page WebViews sit on top of the cont
 
 ## Not in this version
 
-Rewards/BAT, crypto wallet, AI assistant, Tor windows, Chrome Web Store extensions, multiple windows. Saved passwords from other browsers can't be imported, because recent Chromium versions encrypt them with an app-bound key. WebView2 still offers to save new ones.
+Rewards/BAT, crypto wallet, AI assistant, Tor windows, multiple windows. Extensions are installed from a Web Store link (no in-store \"Add to Chrome\" button). Saved passwords from other browsers can't be imported, because recent Chromium versions encrypt them with an app-bound key. WebView2 still offers to save new ones.
 
 ## License
 

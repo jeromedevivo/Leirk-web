@@ -12,6 +12,19 @@ const PRESETS = [
 let sidePanel = null; // "dev" | panel id
 let appIcons = {};
 const panels = () => P("panels") || [];
+
+/* ---------- extensions: toolbar buttons open their popup in the side panel ---------- */
+let exts = [];
+L.exts = list => {
+  exts = list || [];
+  renderExtBar();
+  if ($("#extList")) renderSettings(true);
+};
+function renderExtBar() {
+  $("#extbar").innerHTML = exts.filter(x => x.id && x.popup).map(x => `<button class="icon ext${sidePanel === "ext:" + x.id ? " on" : ""}" data-ext="${esc(x.id)}" title="${esc(x.name)}" aria-label="${esc(x.name)}">${x.icon ? `<img src="${esc(x.icon)}" alt="">` : icon("puzzle")}</button>`).join("");
+}
+$("#extbar").addEventListener("click", e => { const b = e.target.closest("[data-ext]"); if (b) { openPanel("ext:" + b.dataset.ext); renderExtBar(); } });
+send("extList");
 const devOn = () => !!P("dev_mode");
 const mod = m => devOn() && (P("dev_modules") || {})[m] !== false;
 
@@ -37,7 +50,7 @@ function renderPanelBar() {
   side.style.width = (P("panel_width") || 420) + "px";
   if (sidePanel) {
     const p = panels().find(x => x.id === sidePanel);
-    $("#sidetitle").textContent = sidePanel === "dev" ? "Mode développeur" : (p?.title || "");
+    $("#sidetitle").textContent = sidePanel === "dev" ? "Mode développeur" : (p?.title || exts.find(x => "ext:" + x.id === sidePanel)?.name || "");
     $("#sideReload").hidden = sidePanel === "dev";
     $("#sideUnload").hidden = sidePanel === "dev";
     $("#sidebody").classList.toggle("dev", sidePanel === "dev");
@@ -225,13 +238,14 @@ window.tabMenuExtra = id => {
 
 /* ---------- per-state refresh ---------- */
 window.renderExtras = function () {
-  if (sidePanel && sidePanel !== "dev" && !panels().some(p => p.id === sidePanel)) sidePanel = null;
+  if (sidePanel && sidePanel !== "dev" && !sidePanel.startsWith("ext:") && !panels().some(p => p.id === sidePanel)) sidePanel = null;
   refreshCommands();
   renderPanelBar();
 };
 
 /* ---------- settings sections ---------- */
 SECTIONS.splice(SECTIONS.findIndex(s => s.id === "import"), 0,
+  { id: "extensions", icon: "puzzle", title: "Extensions", items: [{ type: "exts", t: "Extensions installées", d: "Chrome Web Store Bitwarden gestionnaire de mots de passe" }] },
   { id: "panels", icon: "tabs", title: "Panneaux latéraux", items: [
     { k: "panel_bar", t: "Afficher la barre de panneaux", d: "La colonne d'icônes à droite de la fenêtre.", type: "toggle" },
     { t: "Ajouter un panneau", d: "Teams, Spotify, WhatsApp, Discord… ou une application Windows ouverte (expérimental).", type: "button", label: "Ajouter", act: () => { closeAll(); setTimeout(openPanelAdd, 50); } },
@@ -256,6 +270,12 @@ SECTIONS.find(s => s.id === "tabs").items.push({ k: "hover_card", t: "Carte au s
 let syncProviders = null;
 L.syncProviders = list => { syncProviders = list; if (openPop === "settings") renderSettings(false); };
 window.customItem = function (it) {
+  if (it.type === "exts") {
+    return `<div class="set col" id="extList"><div><div>Installez n'importe quelle extension du Chrome Web Store : Bitwarden, 1Password, Dark Reader, uBlock Origin Lite…</div>
+      <small>Ouvrez sa page sur chromewebstore.google.com, copiez l'adresse et collez-la ici. Son bouton apparaît ensuite dans la barre d'outils.</small></div>
+      <div class="inline"><input class="in" id="extUrl" placeholder="https://chromewebstore.google.com/detail/…"><button class="btn" id="extAdd">Installer</button></div>
+      ${exts.length ? exts.map(x => `<div class="drow">${x.icon ? `<span class="fav img pimg"><img src="${esc(x.icon)}" alt=""></span>` : icon("puzzle")}<span class="t">${esc(x.name)}</span><span class="k muted">${esc(x.version)}</span><button class="icon" data-ext-del="${esc(x.dir)}" data-ext-id="${esc(x.id)}" aria-label="Retirer ${esc(x.name)}">${icon("trash")}</button></div>`).join("") : `<small class="muted">Aucune extension installée.</small>`}</div>`;
+  }
   if (it.type === "panels") {
     const list = panels();
     return `<div class="set col">${list.length ? list.map(p => `<div class="drow">${panelIcon(p)}<span class="t">${esc(p.title)}</span><span class="k muted">${p.kind === "app" ? "application · expérimental" : esc(hostOf(p.url))}</span><button class="icon" data-panel-del="${esc(p.id)}" aria-label="Retirer ${esc(p.title)}">${icon("trash")}</button></div>`).join("") : `<small>Aucun panneau pour l'instant.</small>`}</div>`;
@@ -275,6 +295,9 @@ window.customItem = function (it) {
   return "";
 };
 $("#setbody").addEventListener("click", e => {
+  if (e.target.id === "extAdd") { send("extInstall", $("#extUrl").value.trim()); $("#extUrl").value = ""; return; }
+  const xd = e.target.closest("[data-ext-del]");
+  if (xd) { if (sidePanel === "ext:" + xd.dataset.extId) { sidePanel = null; send("panelClose"); renderPanelBar(); } return send("extRemove", { id: xd.dataset.extId, dir: xd.dataset.extDel }); }
   const del = e.target.closest("[data-panel-del]");
   if (del) { removePanel(del.dataset.panelDel); return setTimeout(() => renderSettings(false), 100); }
   const s = e.target.closest("[data-sync]");

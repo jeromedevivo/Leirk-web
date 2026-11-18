@@ -36,6 +36,7 @@ use wry::{
 mod devapi;
 mod inspector;
 mod devhost;
+mod exthost;
 mod panels;
 mod synchost;
 
@@ -47,6 +48,12 @@ enum Ev {
     NewTab(String),
     /// Addresses handed over by a second launch of Leirk ("" only brings the window forward).
     Launched(Vec<String>),
+    /// Installed extensions for the chrome (list built off the UI thread).
+    Exts(Value),
+    /// An extension was downloaded and unpacked: load it.
+    ExtFetched(PathBuf),
+    /// Extension install/remove finished, with the message to show.
+    ExtDone(String),
     Blocked(TabId),
     Key(&'static str),
     Favicon(TabId, String),
@@ -350,6 +357,8 @@ struct App {
     side: (f64, f64, f64, f64),
     panel_open: Option<String>,
     panel_views: HashMap<String, WebView>,
+    /// Extension popup pages by WebView2 extension id, opened as side panels ("ext:<id>").
+    ext_popups: HashMap<String, String>,
     docked: HashMap<String, panels::Docked>,
     remote_tabs: Vec<Value>,
     sync_devices: Vec<Value>,
@@ -1109,7 +1118,7 @@ impl App {
         if !matches!(c, "query" | "layout" | "log" | "raise" | "tabInfo") {
             self.log(&format!("cmd {c}")); // never the arguments: they carry URLs, searches and cookie values
         }
-        if self.dev_command(c, v) || self.panel_command(c, v) || self.sync_command(c, v) {
+        if self.dev_command(c, v) || self.panel_command(c, v) || self.sync_command(c, v) || self.ext_command(c, v) {
             return;
         }
         let target = v.as_u64().unwrap_or(self.tabs.active);
@@ -1555,6 +1564,19 @@ impl App {
                     self.shared.doc_headers.borrow_mut().remove(&id);
                 }
             }
+            Ev::Exts(list) => {
+                self.ext_popups = list.as_array().into_iter().flatten()
+                    .filter(|e| e["id"].as_str().is_some_and(|i| !i.is_empty()) && e["popup"].as_str().is_some_and(|p| !p.is_empty()))
+                    .map(|e| (e["id"].as_str().unwrap_or("").to_string(), e["popup"].as_str().unwrap_or("").to_string()))
+                    .collect();
+                self.js(&format!("L.exts({list})"));
+                return;
+            }
+            Ev::ExtFetched(path) => return self.ext_load(path),
+            Ev::ExtDone(msg) => {
+                self.js(&format!("toast({})", json!(msg)));
+                return self.ext_list();
+            }
             Ev::Launched(urls) => {
                 for u in urls.iter().filter_map(|u| launch_url(u)) {
                     self.new_tab(&u, false, false);
@@ -1794,6 +1816,7 @@ fn main() {
         side: (0.0, 0.0, 0.0, 0.0),
         panel_open: None,
         panel_views: HashMap::new(),
+        ext_popups: HashMap::new(),
         docked: HashMap::new(),
         remote_tabs: vec![],
         sync_devices: vec![],

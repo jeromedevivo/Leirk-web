@@ -227,6 +227,10 @@ impl App {
                 let id = v.as_str().unwrap_or("").to_string();
                 if id == "dev" {
                     self.panel_open = Some(id);
+                } else if let Some(popup) = id.strip_prefix("ext:").and_then(|e| Some(format!("chrome-extension://{e}/{}", self.ext_popups.get(e)?))) {
+                    // an extension's popup (Bitwarden vault…) lives in the side panel
+                    self.open_web_panel(&id, &popup);
+                    self.panel_open = Some(id);
                 } else if let Some(p) = self.panel(&id) {
                     let ok = if p["kind"] == "app" {
                         self.dock_app(&id, p["exe"].as_str().unwrap_or(""))
