@@ -1133,6 +1133,7 @@ name = "leirk"
 version = "0.1.0"
 dependencies = [
  "adblock",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

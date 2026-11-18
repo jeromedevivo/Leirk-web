@@ -1,8 +1,11 @@
 pub mod b64;
 pub mod calc;
+pub mod devtools;
 pub mod import;
 pub mod omnibox;
 pub mod privacy;
 pub mod shields;
 pub mod store;
+pub mod sync;
 pub mod tabs;
+pub mod tech;

@@ -1097,7 +1097,7 @@ impl App {
                 }
                 let (url, title) = (t.url.clone(), t.title.clone());
                 if !self.profile.bookmarks.iter().any(|b| b.url == url) {
-                    self.profile.bookmarks.push(Bookmark { title, url, folder: String::new() });
+                    self.profile.bookmarks.push(Bookmark { title, url, folder: String::new(), ts: 0 });
                     self.bookmarks_dirty = true;
                 }
                 self.push();

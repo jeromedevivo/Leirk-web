@@ -37,7 +37,7 @@ pub fn parse_chromium_bookmarks(json: &str) -> Vec<Bookmark> {
             Some("url") => {
                 let url = node["url"].as_str().unwrap_or("");
                 if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("file://") {
-                    out.push(Bookmark { title: name.into(), url: url.into(), folder: folder.into() });
+                    out.push(Bookmark { title: name.into(), url: url.into(), folder: folder.into(), ts: 0 });
                 }
             }
             Some("folder") => {
@@ -199,7 +199,7 @@ pub fn import(src: &Source, profile: &mut Profile, history: &mut History, favico
                     marks
                         .into_iter()
                         .filter(|m| m.0.starts_with("http"))
-                        .map(|(url, title, _, _)| Bookmark { title, url, folder: "Firefox".into() })
+                        .map(|(url, title, _, _)| Bookmark { title, url, folder: "Firefox".into(), ts: 0 })
                         .collect(),
                 );
                 let mut rows = query_rows(
@@ -262,7 +262,7 @@ mod tests {
         let b = parse_chromium_bookmarks(BOOKMARKS);
         assert_eq!(b.len(), 3);
         assert_eq!(b[2].folder, "Autres");
-        assert_eq!(b[0], Bookmark { title: "Rust".into(), url: "https://rust-lang.org/".into(), folder: "".into() });
+        assert_eq!(b[0], Bookmark { title: "Rust".into(), url: "https://rust-lang.org/".into(), folder: "".into(), ts: 0 });
         assert_eq!(b[1].folder, "Dev");
         assert!(parse_chromium_bookmarks("not json").is_empty());
     }

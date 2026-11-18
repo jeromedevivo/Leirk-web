@@ -4,12 +4,15 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct Bookmark {
     pub title: String,
     pub url: String,
     #[serde(default)]
     pub folder: String,
+    /// Last change (unix seconds), so sync can tell which edit is newest.
+    #[serde(default)]
+    pub ts: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -245,7 +248,7 @@ mod tests {
     #[test]
     fn profile_merges_without_duplicates() {
         let mut p = Profile::default();
-        let b = |u: &str| Bookmark { title: u.into(), url: u.into(), folder: String::new() };
+        let b = |u: &str| Bookmark { title: u.into(), url: u.into(), folder: String::new(), ts: 0 };
         assert_eq!(p.merge_bookmarks(vec![b("https://a/"), b("https://a/"), b("https://b/")]), 2);
         assert_eq!(p.merge_bookmarks(vec![b("https://a/")]), 0);
         let n = p.engines.len();
