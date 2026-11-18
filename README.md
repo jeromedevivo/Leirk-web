@@ -13,6 +13,7 @@ that keeps 50 tabs open for the RAM other browsers spend on a handful.
 ![Rust](https://img.shields.io/badge/built%20with-Rust-dea584)
 ![Engine](https://img.shields.io/badge/engine-WebView2%20(Chromium)-4285f4)
 ![Ad blocking](https://img.shields.io/badge/adblock--tester-100%2F100-2ea44f)
+[![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-8a63d2)](LICENSE.md)
 
 [**Download**](#download) · [Features](#features) · [Memory](#why-it-stays-light) · [Build](#build-from-source) · [Architecture](#architecture)
 
@@ -168,6 +169,13 @@ The UI is one WebView2 covering the window; page WebViews sit on top of the cont
 ## Not in this version
 
 Rewards/BAT, crypto wallet, AI assistant, Tor windows, Chrome Web Store extensions, multiple windows. Saved passwords from other browsers can't be imported, because recent Chromium versions encrypt them with an app-bound key. WebView2 still offers to save new ones.
+
+## License
+
+Leirk is **source-available** under the [PolyForm Noncommercial License 1.0.0](LICENSE.md).
+You are free to use, study, modify and share it — for personal, educational, research or other
+**noncommercial** purposes. Selling Leirk or a modified version, or using it in a commercial product,
+is not permitted without the author's written permission.
 
 ## Contributing
 

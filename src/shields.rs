@@ -3,6 +3,27 @@
 use serde_json::Value;
 use std::collections::HashSet;
 
+/// Procedural cosmetic filters (`:has-text`, `:upward`, `:remove()`…), applied in the page like Brave's content script.
+/// `__P__` is replaced by the JSON list adblock-rust returns; filters with an unknown operator are skipped, never guessed.
+const PROCEDURAL_JS: &str = r#"var P=__P__;
+var R=function(a){var m=/^\/(.+)\/([imsu]*)$/.exec(a);if(m)return new RegExp(m[1],m[2]);return{test:function(s){return String(s).indexOf(a)>=0}}};
+var css=function(n,a){var i=a.indexOf(':');var p=a.slice(0,i).trim(),v=a.slice(i+1).trim();return R(v).test(getComputedStyle(n)[p])};
+var step=function(ns,o){var r=[];for(var k=0;k<ns.length;k++){var n=ns[k],a=o.arg;switch(o.type){
+case'css-selector':var q=n===document?document.querySelectorAll(a):n.querySelectorAll(/^[>+~]/.test(a)?':scope'+a:':scope '+a);for(var j=0;j<q.length;j++)r.push(q[j]);break;
+case'has-text':if(R(a).test(n.textContent))r.push(n);break;
+case'min-text-length':if(n.textContent.length>=+a)r.push(n);break;
+case'matches-css':if(css(n,a))r.push(n);break;
+case'matches-path':if(R(a).test(location.pathname+location.search))r.push(n);break;
+case'matches-attr':var m=/^"?([^"=]+)"?(?:="?(.*?)"?)?$/.exec(a);if(m){var at=[].slice.call(n.attributes||[]);if(at.some(function(x){return R(m[1]).test(x.name)&&(m[2]===undefined||R(m[2]).test(x.value))}))r.push(n)}break;
+case'upward':var u=n;if(/^\d+$/.test(a)){for(var t=+a;t>0&&u;t--)u=u.parentElement}else u=n.parentElement&&n.parentElement.closest(a);if(u)r.push(u);break;
+case'xpath':var x=document.evaluate(a,n,null,7,null);for(var j=0;j<x.snapshotLength;j++)r.push(x.snapshotItem(j));break;
+default:return null}}return r};
+var apply=function(){P.forEach(function(f){try{var ns=[document];for(var i=0;i<f.selector.length&&ns;i++)ns=step(ns,f.selector[i]);if(!ns)return;var a=f.action||{};
+ns.forEach(function(n){if(n===document)return;switch(a.type){case'remove':n.remove();break;case'style':n.style.cssText+=';'+a.arg;break;
+case'remove-attr':n.removeAttribute(a.arg);break;case'remove-class':n.classList.remove(a.arg);break;default:n.style.setProperty('display','none','important')}})}catch(e){}})};
+var due=0;var later=function(){if(!due)due=setTimeout(function(){due=0;apply()},150)};
+document.addEventListener('DOMContentLoaded',function(){apply();new MutationObserver(later).observe(document.documentElement,{childList:true,subtree:true})});"#;
+
 pub struct FilterList {
     pub id: &'static str,
     pub urls: &'static [&'static str],
@@ -150,9 +171,15 @@ impl Shields {
         }
         let res = self.engine.url_cosmetic_resources(url);
         let sels: Vec<&str> = res.hide_selectors.iter().map(String::as_str).collect();
-        if sels.is_empty() && res.injected_script.is_empty() {
+        if sels.is_empty() && res.injected_script.is_empty() && res.procedural_actions.is_empty() {
             return None;
         }
+        let procedural = if res.procedural_actions.is_empty() {
+            String::new()
+        } else {
+            let list: Vec<Value> = res.procedural_actions.iter().filter_map(|p| serde_json::from_str(p).ok()).collect();
+            PROCEDURAL_JS.replace("__P__", &Value::Array(list).to_string())
+        };
         let style = if sels.is_empty() {
             String::new()
         } else {
@@ -163,7 +190,8 @@ impl Shields {
                  if(document.documentElement)a();else new MutationObserver(function(m,o){{if(document.documentElement){{o.disconnect();a()}}}}).observe(document,{{childList:true}});"
             )
         };
-        Some(format!("(function(){{if(window.top!==window)return;try{{{}}}catch(e){{}}{style}}})();", res.injected_script))
+        // every frame: ads are often served in iframes, and Brave runs scriptlets there too
+        Some(format!("(function(){{try{{{}}}catch(e){{}}{style}try{{{procedural}}}catch(e){{}}}})();", res.injected_script))
     }
 
     /// Generic cosmetic filtering: selectors matching the classes and ids the page actually uses.
@@ -213,6 +241,23 @@ mod tests {
         s.disabled_sites.insert("site.com".into());
         assert!(!s.should_block("https://ads.example.com/x.js", "https://site.com/a", "script"));
         assert_eq!(s.document_script("https://site.com/"), None);
+    }
+
+    #[test]
+    fn procedural_filters_reach_the_page_script() {
+        // native ads hidden by text, as uBlock Origin and Brave do
+        let s = Shields::new("feed.com##div.post:has-text(Sponsored)\nfeed.com##.promo:remove()");
+        let js = s.document_script("https://feed.com/").expect("script for feed.com");
+        assert!(js.contains("has-text") && js.contains("Sponsored"), "{js}");
+        assert!(js.contains("remove"), "{js}");
+        assert!(s.document_script("https://other.com/").is_none());
+    }
+
+    #[test]
+    fn scriptlets_also_run_in_frames() {
+        let s = Shields::new("feed.com##div.post:has-text(Sponsored)");
+        let js = s.document_script("https://feed.com/").unwrap();
+        assert!(!js.contains("window.top!==window"), "ads often live in iframes: {js}");
     }
 
     #[test]
