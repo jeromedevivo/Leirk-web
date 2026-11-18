@@ -23,17 +23,51 @@ pub struct SyncDoc {
 
 /// Union of every device's bookmarks: for each URL the most recent change wins, deletions included.
 pub fn merge_bookmarks(docs: &[&SyncDoc]) -> Vec<Bookmark> {
-    todo!()
+    let mut order: Vec<String> = vec![];
+    let mut latest: std::collections::HashMap<String, (i64, Option<Bookmark>)> = std::collections::HashMap::new();
+    let mut offer = |url: &str, ts: i64, b: Option<Bookmark>| {
+        if !latest.contains_key(url) {
+            order.push(url.to_string());
+        }
+        let e = latest.entry(url.to_string()).or_insert((i64::MIN, None));
+        // on a tie a bookmark beats a deletion: losing data is worse than keeping it
+        if ts > e.0 || (ts == e.0 && b.is_some()) {
+            *e = (ts, b);
+        }
+    };
+    for d in docs {
+        for b in &d.bookmarks {
+            offer(&b.url, b.ts, Some(b.clone()));
+        }
+        for (url, ts) in &d.deleted {
+            offer(url, *ts, None);
+        }
+    }
+    order.into_iter().filter_map(|u| latest.remove(&u).and_then(|(_, b)| b)).collect()
 }
 
 /// The prefs most recently changed on any device.
 pub fn newest_prefs<'a>(docs: &[&'a SyncDoc]) -> Option<&'a Value> {
-    todo!()
+    docs.iter().filter(|d| d.prefs.is_object()).max_by_key(|d| d.prefs_ts).map(|d| &d.prefs)
 }
 
 /// Cloud folders found on this PC: (provider, folder). `home`/`local` stand for USERPROFILE/LOCALAPPDATA.
 pub fn providers(home: &Path, onedrive: Option<PathBuf>, drives: &[PathBuf]) -> Vec<(String, PathBuf)> {
-    todo!()
+    let mut out = vec![];
+    if let Some(od) = onedrive.filter(|p| p.is_dir()) {
+        out.push(("OneDrive".to_string(), od));
+    }
+    // Google Drive for desktop mounts a drive letter with "Mon Drive" / "My Drive"
+    let gdrive = drives.iter().flat_map(|d| [d.join("Mon Drive"), d.join("My Drive")]).chain([home.join("Google Drive")]).find(|p| p.is_dir());
+    if let Some(g) = gdrive {
+        out.push(("Google Drive".to_string(), g));
+    }
+    for (name, dir) in [("Dropbox", "Dropbox"), ("iCloud Drive", "iCloudDrive"), ("Nextcloud", "Nextcloud"), ("pCloud", "pCloud Drive")] {
+        if home.join(dir).is_dir() {
+            out.push((name.to_string(), home.join(dir)));
+        }
+    }
+    out
 }
 
 #[cfg(test)]

@@ -38,11 +38,24 @@ struct Pattern {
 
 impl Pattern {
     fn parse(raw: &str) -> Pattern {
-        todo!()
+        let mut parts = raw.split("\\;");
+        let src = parts.next().unwrap_or("").to_string();
+        let version = parts.find_map(|p| p.strip_prefix("version:")).unwrap_or("").to_string();
+        Pattern { src, version, re: OnceLock::new() }
     }
     /// `Some(version)` when the pattern matches `text` ("" when no version is extracted).
     fn test(&self, text: &str) -> Option<String> {
-        todo!()
+        if self.src.is_empty() {
+            return Some(String::new());
+        }
+        // JS-only syntax (lookbehind, backreferences) fails to compile and the pattern is skipped
+        let re = self.re.get_or_init(|| RegexBuilder::new(&self.src).case_insensitive(true).size_limit(1 << 20).build().ok());
+        let caps = re.as_ref()?.captures(text)?;
+        let mut v = self.version.clone();
+        for i in (1..caps.len()).rev() {
+            v = v.replace(&format!("\\{i}"), caps.get(i).map_or("", |m| m.as_str()));
+        }
+        Some(v.trim().to_string())
     }
 }
 
@@ -70,7 +83,57 @@ pub struct Db {
 impl Db {
     /// `techs` are the a.json … z.json files; `cats` is categories.json.
     pub fn parse(techs: &[&str], cats: &str) -> Db {
-        todo!()
+        fn list(v: &Value) -> Vec<String> {
+            match v {
+                Value::String(s) => vec![s.clone()],
+                Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+                _ => vec![],
+            }
+        }
+        fn keyed(v: &Value, lower: bool) -> Vec<(String, Pattern)> {
+            let Some(o) = v.as_object() else { return vec![] };
+            o.iter()
+                .flat_map(|(k, p)| {
+                    let k = if lower { k.to_lowercase() } else { k.clone() };
+                    let pats = if p.is_string() || p.is_array() { list(p) } else { vec![String::new()] };
+                    pats.into_iter().map(move |s| (k.clone(), Pattern::parse(&s)))
+                })
+                .collect()
+        }
+        let pats = |v: &Value| list(v).iter().map(|s| Pattern::parse(s)).collect::<Vec<_>>();
+        let mut out = vec![];
+        for text in techs {
+            let Ok(Value::Object(map)) = serde_json::from_str::<Value>(text) else { continue };
+            for (name, t) in map {
+                let dom = match &t["dom"] {
+                    Value::Object(o) => o.iter().filter(|(_, v)| v.get("exists").is_some()).map(|(k, _)| k.clone()).collect(),
+                    v => list(v),
+                };
+                out.push(Tech {
+                    cats: t["cats"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default(),
+                    icon: t["icon"].as_str().unwrap_or("").to_string(),
+                    website: t["website"].as_str().unwrap_or("").to_string(),
+                    headers: keyed(&t["headers"], true),
+                    cookies: keyed(&t["cookies"], true),
+                    meta: keyed(&t["meta"], true),
+                    js: keyed(&t["js"], false),
+                    script_src: pats(&t["scriptSrc"]),
+                    html: pats(&t["html"]),
+                    url: pats(&t["url"]),
+                    dom,
+                    implies: list(&t["implies"]).iter().map(|s| s.split("\\;").next().unwrap_or("").to_string()).collect(),
+                    name,
+                });
+            }
+        }
+        let cats = serde_json::from_str::<Value>(cats)
+            .ok()
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(k, v)| Some((k.parse().ok()?, v["name"].as_str()?.to_string())))
+            .collect();
+        Db { techs: out, cats }
     }
 
     pub fn len(&self) -> usize {
@@ -83,17 +146,82 @@ impl Db {
 
     /// Every JS global the fingerprints probe, for the page script to look up.
     pub fn js_keys(&self) -> Vec<String> {
-        todo!()
+        let set: std::collections::BTreeSet<&String> = self.techs.iter().flat_map(|t| t.js.iter().map(|(k, _)| k)).collect();
+        set.into_iter().cloned().collect()
     }
 
     /// Every DOM "exists" selector the fingerprints use.
     pub fn dom_selectors(&self) -> Vec<String> {
-        todo!()
+        let set: std::collections::BTreeSet<&String> = self.techs.iter().flat_map(|t| t.dom.iter()).collect();
+        set.into_iter().cloned().collect()
     }
 
     /// Detected technologies (with those they imply), sorted by category then name.
     pub fn detect(&self, s: &Signals) -> Vec<Found> {
-        todo!()
+        let lower = |v: &[(String, String)]| v.iter().map(|(k, x)| (k.to_lowercase(), x.clone())).collect::<Vec<_>>();
+        let (headers, meta) = (lower(&s.headers), lower(&s.meta));
+        let cookies: HashSet<String> = s.cookies.iter().map(|c| c.to_lowercase()).collect();
+        let dom: HashSet<&String> = s.dom.iter().collect();
+        let mut hits: BTreeMap<String, String> = BTreeMap::new();
+        for t in &self.techs {
+            let mut ver: Option<String> = None;
+            let mut hit = |v: Option<String>| {
+                if let Some(v) = v {
+                    if ver.as_ref().is_none_or(|x| x.is_empty()) {
+                        ver = Some(v);
+                    }
+                }
+            };
+            for (name, p) in &t.headers {
+                headers.iter().filter(|(k, _)| k == name).for_each(|(_, v)| hit(p.test(v)));
+            }
+            for (name, p) in &t.meta {
+                meta.iter().filter(|(k, _)| k == name).for_each(|(_, v)| hit(p.test(v)));
+            }
+            for (name, p) in &t.js {
+                s.js.iter().filter(|(k, _)| k == name).for_each(|(_, v)| hit(p.test(v)));
+            }
+            for (name, _) in &t.cookies {
+                if cookies.contains(name) {
+                    hit(Some(String::new()));
+                }
+            }
+            for p in &t.script_src {
+                s.scripts.iter().for_each(|src| hit(p.test(src)));
+            }
+            if !s.html.is_empty() {
+                t.html.iter().for_each(|p| hit(p.test(&s.html)));
+            }
+            if !s.url.is_empty() {
+                t.url.iter().for_each(|p| hit(p.test(&s.url)));
+            }
+            if t.dom.iter().any(|d| dom.contains(d)) {
+                hit(Some(String::new()));
+            }
+            if let Some(v) = ver {
+                hits.insert(t.name.clone(), v);
+            }
+        }
+        let by_name: HashMap<&str, &Tech> = self.techs.iter().map(|t| (t.name.as_str(), t)).collect();
+        let mut queue: Vec<String> = hits.keys().cloned().collect();
+        while let Some(n) = queue.pop() {
+            for imp in by_name.get(n.as_str()).map(|t| t.implies.clone()).unwrap_or_default() {
+                if by_name.contains_key(imp.as_str()) && !hits.contains_key(&imp) {
+                    hits.insert(imp.clone(), String::new());
+                    queue.push(imp);
+                }
+            }
+        }
+        let mut found: Vec<Found> = hits
+            .into_iter()
+            .filter_map(|(name, version)| {
+                let t = by_name.get(name.as_str())?;
+                let category = t.cats.first().and_then(|c| self.cats.get(c)).cloned().unwrap_or_default();
+                Some(Found { name, version, category, icon: t.icon.clone(), website: t.website.clone() })
+            })
+            .collect();
+        found.sort_by(|a, b| (&a.category, &a.name).cmp(&(&b.category, &b.name)));
+        found
     }
 }
 

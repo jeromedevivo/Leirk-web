@@ -24,12 +24,52 @@ pub struct Port {
 
 /// `docker ps -a --format "{{json .}}"` output, merged with `docker stats --no-stream --format "{{json .}}"`.
 pub fn parse_docker(ps: &str, stats: &str) -> Vec<Container> {
-    todo!()
+    let json = |s: &str| s.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l.trim()).ok()).collect::<Vec<_>>();
+    let field = |v: &serde_json::Value, k: &str| v[k].as_str().unwrap_or("").to_string();
+    let usage: HashMap<String, (String, String)> = json(stats)
+        .iter()
+        .map(|v| (field(v, "ID"), (field(v, "CPUPerc"), field(v, "MemUsage").split(" / ").next().unwrap_or("").to_string())))
+        .collect();
+    json(ps)
+        .iter()
+        .map(|v| {
+            let id = field(v, "ID");
+            let mut ports: Vec<u16> = vec![];
+            for p in field(v, "Ports").split(", ") {
+                if let Some(port) = p.split("->").next().filter(|_| p.contains("->")).and_then(|h| h.rsplit(':').next()?.parse().ok()) {
+                    if !ports.contains(&port) {
+                        ports.push(port);
+                    }
+                }
+            }
+            let (cpu, mem) = usage.get(&id).cloned().unwrap_or_default();
+            Container { name: field(v, "Names"), image: field(v, "Image"), state: field(v, "State"), status: field(v, "Status"), ports, cpu, mem, id }
+        })
+        .collect()
 }
 
 /// Listening TCP ports from `netstat -ano -p tcp`, named with `tasklist /fo csv /nh`.
 pub fn parse_ports(netstat: &str, tasklist: &str) -> Vec<Port> {
-    todo!()
+    let names: HashMap<u32, String> = tasklist
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.trim().trim_matches('"').split("\",\"").collect();
+            Some((f.get(1)?.parse().ok()?, f.first()?.to_string()))
+        })
+        .collect();
+    let mut out: Vec<Port> = vec![];
+    for line in netstat.lines() {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 5 || f[0] != "TCP" || !matches!(f[3], "LISTENING" | "ÉCOUTE" | "ECOUTE") {
+            continue;
+        }
+        let (Some(port), Ok(pid)) = (f[1].rsplit(':').next().and_then(|p| p.parse::<u16>().ok()), f[4].parse::<u32>()) else { continue };
+        if !out.iter().any(|p| p.port == port) {
+            out.push(Port { port, pid, process: names.get(&pid).cloned().unwrap_or_default() });
+        }
+    }
+    out.sort_by_key(|p| p.port);
+    out
 }
 
 #[cfg(test)]
