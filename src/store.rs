@@ -73,8 +73,16 @@ pub fn merged_prefs(saved: &serde_json::Value) -> serde_json::Value {
 }
 
 pub fn data_dir() -> PathBuf {
-    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    base.join("Leirk")
+    let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)).unwrap_or_default();
+    data_dir_for(&exe_dir, std::env::var_os("LOCALAPPDATA").map(PathBuf::from))
+}
+
+/// Portable build: a `portable` file next to the exe keeps the profile in `data/` beside it (USB stick, no install).
+pub fn data_dir_for(exe_dir: &Path, local_app_data: Option<PathBuf>) -> PathBuf {
+    if exe_dir.join("portable").is_file() {
+        return exe_dir.join("data");
+    }
+    local_app_data.unwrap_or_else(std::env::temp_dir).join("Leirk")
 }
 
 pub fn load_json<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> T {
@@ -199,6 +207,17 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portable_build_keeps_its_data_next_to_the_exe() {
+        let exe = std::env::temp_dir().join(format!("leirk-portable-{}", std::process::id()));
+        std::fs::create_dir_all(&exe).unwrap();
+        let local = Some(PathBuf::from("C:/Users/x/AppData/Local"));
+        assert_eq!(data_dir_for(&exe, local.clone()), PathBuf::from("C:/Users/x/AppData/Local").join("Leirk"));
+        std::fs::write(exe.join("portable"), "").unwrap();
+        assert_eq!(data_dir_for(&exe, local), exe.join("data"));
+        let _ = std::fs::remove_dir_all(&exe);
+    }
 
     fn mem() -> History {
         History::open(Path::new(":memory:")).unwrap()

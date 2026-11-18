@@ -140,7 +140,7 @@ function showCard(id, el) {
   card.innerHTML = `${preview ? `<div class="thumb" id="hcThumb">${t.loaded ? "" : `<span>${icon("moon")}Déchargé de la mémoire</span>`}</div>` : ""}
     <div class="hc"><b>${esc(tabTitle(t))}</b><span class="muted">${esc(hostOf(t.url) || "Nouvel onglet")}${t.container ? ` · conteneur ${esc(t.container)}` : ""}</span>
     <span class="mem" id="hcMem">${t.loaded ? "Mémoire : …" : t.url ? "Mémoire : 0 Mo · se recharge au clic" : "Mémoire : 0 Mo"}</span>
-    ${t.errors ? `<span class="hcerr">${t.errors} erreur${t.errors > 1 ? "s" : ""} JavaScript</span>` : ""}</div>`;
+</div>`;
   const r = el.getBoundingClientRect(), vertical = P("tabs_position") === "left";
   card.style.left = Math.max(8, Math.min(innerWidth - 300, vertical ? r.right + 8 : r.left)) + "px";
   card.style.top = (vertical ? r.top : r.bottom + 6) + "px";
@@ -210,12 +210,12 @@ function refreshCommands() {
     COMMANDS.push(["stack", `Ouvrir dans le conteneur « ${n} »`, () => send("openContainer", { name: n }), "", () => !!S.url]);
 }
 
-/* ---------- tab extras: JS errors dot, container colour, context menu ---------- */
+/* ---------- tab extras: container colour, context menu ---------- */
 const ctColor = n => `oklch(0.62 0.16 ${[...n].reduce((a, c) => a + c.charCodeAt(0) * 37, 0) % 360})`;
 window.tabExtra = t => ({
   cls: (t.container ? " ct" : ""),
   style: t.container ? `--ct:${ctColor(t.container)}` : "",
-  html: t.errors && mod("errors") ? `<span class="errdot" title="${t.errors} erreur(s) JavaScript"></span>` : "",
+  html: "",
 });
 window.tabMenuExtra = id => {
   const names = (P("dev_containers") || "").split("\n").map(s => s.trim()).filter(Boolean);
@@ -243,7 +243,6 @@ SECTIONS.splice(SECTIONS.findIndex(s => s.id === "import"), 0,
     { h: "Modules" },
     { k: "dev_modules.js", t: "JavaScript en un clic", d: "Bouton JS dans l'onglet Leirk des DevTools pour couper ou réactiver les scripts du site.", type: "sub" },
     { k: "dev_modules.tech", t: "Technologies (Wappalyzer)", d: "Frameworks, CMS, serveurs, analytics… avec leurs versions.", type: "sub" },
-    { k: "dev_modules.errors", t: "Pastille d'erreurs JavaScript", d: "Point rouge sur l'onglet et nombre d'erreurs dans l'aperçu au survol. Le détail est dans la Console.", type: "sub" },
     { k: "dev_modules.docker", t: "Docker", d: "Projets Compose puis leurs conteneurs : tout démarrer ou arrêter d'un clic, ports cliquables, CPU et RAM, logs.", type: "sub" },
     { k: "dev_modules.ports", t: "Ports locaux", d: "Serveurs web en écoute sur ce PC (vite, node, IIS…), ouvrables d'un clic.", type: "sub" },
     { k: "dev_modules.tools", t: "Outils", d: "Décoder un JWT, Base64, encodage d'URL, JSON, timestamp, identifiant unique, changement d'environnement — aussi dans F2.", type: "sub" },

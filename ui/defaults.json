@@ -68,7 +68,6 @@
     "js": true,
     "tech": true,
     "network": true,
-    "errors": true,
     "docker": true,
     "ports": true,
     "perf": true,

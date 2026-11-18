@@ -60,7 +60,6 @@ enum Ev {
     Dev(String, Value),
     TechDb(std::sync::Arc<leirk::tech::Db>),
     Thumb(TabId, String),
-    Repaint,
     /// A side panel's icon, remembered like a site's icon.
     SiteIcon(String, String),
     /// A command from the DevTools "Leirk" tab: (command, argument, inspected-tab nonce, reply channel).
@@ -283,8 +282,7 @@ struct Shared {
     doc_scripts: RefCell<HashMap<TabId, String>>,
     upgraded: RefCell<HashMap<TabId, String>>,
     http_only: RefCell<HashSet<String>>,
-    /// Developer mode: per-tab request log, JS errors, main document headers.
-    errors: RefCell<HashMap<TabId, Vec<Value>>>,
+    /// Developer mode: main document headers (technology detection).
     doc_headers: RefCell<HashMap<TabId, Vec<(String, String)>>>,
 }
 
@@ -851,8 +849,7 @@ impl App {
             .map(|t| {
                 json!({"id": t.id, "title": t.title, "url": t.url, "favicon": t.favicon, "stack": t.stack,
                        "loaded": t.loaded, "private": t.private, "pinned": t.pinned, "audible": t.audible,
-                       "loading": self.loading.contains(&t.id), "container": t.container,
-                       "errors": self.shared.errors.borrow().get(&t.id).map_or(0, |e| e.len())})
+                       "loading": self.loading.contains(&t.id), "container": t.container})
             })
             .collect();
         let top_sites = if self.active_blank() { self.history.top(8) } else { vec![] };
@@ -1509,7 +1506,6 @@ impl App {
                 self.thumbs.insert(id, format!("data:image/jpeg;base64,{data}"));
                 return;
             }
-            Ev::Repaint => {}
             Ev::SiteIcon(key, uri) => {
                 if !key.is_empty() && is_safe_icon(&uri) && !self.favicons.get(&key).is_some_and(|v| v.starts_with("data:")) {
                     self.favicons.insert(key, uri);
@@ -1554,7 +1550,6 @@ impl App {
                     self.loading.insert(id);
                     self.blocked.remove(&id);
                     // a new document starts: what the developer tools collected belongs to the old one
-                    self.shared.errors.borrow_mut().remove(&id);
                     self.shared.doc_headers.borrow_mut().remove(&id);
                 }
             }
@@ -1722,7 +1717,6 @@ fn main() {
             doc_scripts: RefCell::new(HashMap::new()),
             upgraded: RefCell::new(HashMap::new()),
             http_only: RefCell::new(HashSet::new()),
-            errors: RefCell::new(HashMap::new()),
             doc_headers: RefCell::new(HashMap::new()),
         }),
         shields_gen: 0,

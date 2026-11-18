@@ -131,7 +131,7 @@ impl App {
         self.views.get(&self.dev_tab()).map(|v| v.webview())
     }
 
-    /// Per-webview developer hooks: response log and JS errors (only when their module is on).
+    /// Per-webview developer hooks: main document headers for technology detection (only when that module is on).
     pub(crate) unsafe fn dev_hook(&self, core: &ICoreWebView2, id: TabId) -> windows::core::Result<()> {
         let mut tok = Default::default();
         if let Ok(c2) = core.cast::<ICoreWebView2_2>() {
@@ -165,48 +165,7 @@ impl App {
                 &mut tok,
             )?;
         }
-        if self.shared.dev("errors") {
-            self.watch_errors(core, id);
-        }
         Ok(())
-    }
-
-    /// Records uncaught exceptions and console.error calls (CDP Runtime domain).
-    pub(crate) fn watch_errors(&self, core: &ICoreWebView2, id: TabId) {
-        cdp(core, "Runtime.enable", json!({}), |_| {});
-        for event in ["Runtime.exceptionThrown", "Runtime.consoleAPICalled"] {
-            let (shared, proxy) = (self.shared.clone(), self.proxy.clone());
-            unsafe {
-                let Ok(rx) = core.GetDevToolsProtocolEventReceiver(&HSTRING::from(event)) else { continue };
-                let mut tok = Default::default();
-                let _ = rx.add_DevToolsProtocolEventReceived(
-                    &DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, args| {
-                        let Some(args) = args else { return Ok(()) };
-                        let Ok(v) = serde_json::from_str::<Value>(&pwstr(|p| args.ParameterObjectAsJson(p))) else { return Ok(()) };
-                        let entry = if v["exceptionDetails"].is_object() {
-                            let d = &v["exceptionDetails"];
-                            json!({"msg": d["exception"]["description"].as_str().or(d["text"].as_str()).unwrap_or("Erreur"),
-                                   "src": format!("{}:{}", d["url"].as_str().unwrap_or(""), d["lineNumber"].as_i64().unwrap_or(0) + 1)})
-                        } else if v["type"] == "error" {
-                            let msg: Vec<String> = v["args"].as_array().into_iter().flatten()
-                                .map(|a| a["value"].as_str().map(String::from).or(a["description"].as_str().map(String::from)).unwrap_or_default())
-                                .collect();
-                            json!({"msg": msg.join(" "), "src": "console.error"})
-                        } else {
-                            return Ok(());
-                        };
-                        let mut errs = shared.errors.borrow_mut();
-                        let list = errs.entry(id).or_default();
-                        if list.len() < 200 {
-                            list.push(entry);
-                        }
-                        let _ = proxy.send_event(Ev::Repaint);
-                        Ok(())
-                    })),
-                    &mut tok,
-                );
-            }
-        }
     }
 
     /// Private memory of each loaded tab: renderer processes mapped to tabs through their frames.
@@ -456,11 +415,6 @@ impl App {
                 });
             }
             "devTech" => self.tech_detect(),
-            "devErrorsWatch" => {
-                for (id, view) in &self.views {
-                    self.watch_errors(&view.webview(), *id);
-                }
-            }
             "capture" => self.capture_full(),
             "tabInfo" => {
                 let id = v.as_u64().unwrap_or(0);
