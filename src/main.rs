@@ -1769,7 +1769,7 @@ fn main() {
     app.reload_shields();
     app.sync_now();
 
-    event_loop.run(move |event, _, flow| match event {
+    event_loop.run(move |event, target, flow| match event {
         Event::NewEvents(StartCause::Init) => {
             *flow = ControlFlow::WaitUntil(Instant::now() + TICK);
             app.layout();
@@ -1788,7 +1788,17 @@ fn main() {
             }
             app.push();
         }
-        Event::UserEvent(ev) => app.event(ev),
+        Event::UserEvent(ev) => {
+            app.event(ev);
+            if app.inspector.as_ref().is_some_and(|i| i.want_window) {
+                let title = app.tabs.get(app.tabs.active).map(|t| format!("DevTools - {}", t.url)).unwrap_or_default();
+                if let Ok(w) = WindowBuilder::new().with_title(title).with_inner_size(LogicalSize::new(1000.0, 720.0)).with_window_icon(app_icon()).build(target) {
+                    app.undock_inspector(w);
+                }
+            }
+        }
+        Event::WindowEvent { window_id, event: WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }, .. } if app.is_inspector_window(window_id) => app.fit_inspector_window(),
+        Event::WindowEvent { window_id, event: WindowEvent::CloseRequested, .. } if app.is_inspector_window(window_id) => app.close_inspector(),
         Event::WindowEvent { event: WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }, .. } => {
             app.layout();
             app.push();
