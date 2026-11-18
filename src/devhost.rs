@@ -444,7 +444,7 @@ impl App {
             "devPorts" => {
                 std::thread::spawn(move || {
                     let (netstat, tasklist) = (system_tool("netstat.exe"), system_tool("tasklist.exe"));
-                    let all = parse_ports(&run(&netstat.to_string_lossy(), &["-ano", "-p", "tcp"]).unwrap_or_default(), &run(&tasklist.to_string_lossy(), &["/fo", "csv", "/nh"]).unwrap_or_default());
+                    let all = parse_ports(&run(&netstat.to_string_lossy(), &["-ano"]).unwrap_or_default(), &run(&tasklist.to_string_lossy(), &["/fo", "csv", "/nh"]).unwrap_or_default());
                     // keep what answers HTTP, probed in parallel; Leirk's own DevTools bridge is not a site
                     let me = std::process::id();
                     let web: Vec<bool> = std::thread::scope(|sc| {

@@ -41,10 +41,10 @@ Une page web peut annoncer `devhello:<nonce>`, mais cela associe seulement un id
 
 ## Nouvelle surface : le port de débogage des DevTools dockés
 Pour afficher les vrais DevTools de Chromium dans la fenêtre (mode appareil, côté du dock), Leirk ouvre un port de débogage, comme `--remote-debugging-port` dans Chrome :
-- **seulement en mode développeur** : le port n'existe pas sinon, et l'activer ou le désactiver demande un redémarrage ;
+- **toujours ouvert** : F12 et « Inspecter » passent uniquement par ces DevTools (la fenêtre DevTools de WebView2 est désactivée sur les pages) ;
 - **local uniquement** : `127.0.0.1`, port aléatoire à chaque lancement ;
 - **pages web exclues** : Chromium refuse toute connexion WebSocket dont l'origine n'est pas `devtools://devtools` (`--remote-allow-origins`), ainsi que les requêtes dont l'en-tête Host n'est pas une IP ou `localhost`, ce qui bloque le DNS rebinding ;
-- **risque accepté** : un programme déjà lancé sur ta session Windows peut piloter le navigateur tant que le mode développeur est actif. Un tel programme pourrait de toute façon lire le profil sur le disque.
+- **risque accepté** : un programme déjà lancé sur ta session Windows peut piloter le navigateur pendant que Leirk tourne. Un tel programme pourrait de toute façon lire le profil sur le disque.
 
 ## Risques connus, acceptés ou à traiter plus tard
 - **Retour en HTTP après échec du HTTPS** (comportement standard de Brave) : un attaquant réseau qui bloque le port 443 obtient la version HTTP. Un mode strict pourra être ajouté.

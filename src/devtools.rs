@@ -82,9 +82,15 @@ pub fn parse_ports(netstat: &str, tasklist: &str) -> Vec<Port> {
 /// Databases do not speak HTTP; app RPC ports and Windows services answer "/" with 404 or 503.
 pub fn speaks_http(port: u16) -> bool {
     use std::io::{Read, Write};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, TcpStream};
     let t = std::time::Duration::from_millis(400);
-    let Ok(mut s) = std::net::TcpStream::connect_timeout(&(std::net::Ipv4Addr::LOCALHOST, port).into(), t) else { return false };
-    let _ = (s.set_read_timeout(Some(t)), s.set_write_timeout(Some(t)));
+    // "localhost" servers (Vite, Node 17+) often listen on [::1] only
+    let Some(mut s) = [IpAddr::V4(Ipv4Addr::LOCALHOST), IpAddr::V6(Ipv6Addr::LOCALHOST)].into_iter().find_map(|ip| TcpStream::connect_timeout(&(ip, port).into(), t).ok()) else {
+        return false;
+    };
+    // a dev server may compile the page on its first request
+    let wait = std::time::Duration::from_secs(3);
+    let _ = (s.set_read_timeout(Some(wait)), s.set_write_timeout(Some(t)));
     let mut buf = [0u8; 12]; // "HTTP/1.1 200"
     if s.write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n").is_err() || s.read_exact(&mut buf).is_err() || !buf.starts_with(b"HTTP/") {
         return false;
@@ -148,6 +154,20 @@ not json"#;
         assert!(speaks_http(wp));
         assert!(!speaks_http(rp));
         assert!(!speaks_http(ap));
+    }
+
+    #[test]
+    fn dev_servers_listening_on_ipv6_localhost_are_found() {
+        use std::io::{Read, Write};
+        // Vite and recent Node bind "localhost", which Windows resolves to [::1] only
+        let Ok(v6) = std::net::TcpListener::bind("[::1]:0") else { return };
+        let port = v6.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut s, _) = v6.accept().unwrap();
+            let _ = s.read(&mut [0u8; 256]);
+            let _ = s.write_all(b"HTTP/1.1 200 OK\r\n\r\n");
+        });
+        assert!(speaks_http(port));
     }
 
     #[test]

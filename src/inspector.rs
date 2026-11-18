@@ -46,6 +46,30 @@ const HOST_HOOK: &str = r#"(() => {
     return true;
   };
   if (!patch()) { const t = setInterval(() => patch() && clearInterval(t), 5); }
+  // the front end ignores extension panel icons: put Leirk's next to its tab title, like the built-in tools
+  const tabs = (root, out) => {
+    for (const el of root.querySelectorAll("*")) {
+      if (el.classList.contains("tabbed-pane-header-tab") && el.textContent.trim() === "Leirk") out.push(el);
+      if (el.shadowRoot) tabs(el.shadowRoot, out);
+    }
+    return out;
+  };
+  setInterval(() => {
+    for (const tab of tabs(document, [])) {
+      if (!tab.querySelector(".leirk-ic")) {
+        const img = document.createElement("img");
+        img.className = "leirk-ic";
+        img.src = "__ICON__";
+        img.style.cssText = "width:14px;height:14px;margin-right:5px;flex:none;border-radius:3px";
+        tab.insertBefore(img, tab.querySelector(".tabbed-pane-header-tab-title") || tab.firstChild);
+      }
+      // the front end sizes tabs from their text; widen ours by the icon whenever it re-measures
+      if (tab.style.width && tab.style.width !== tab.dataset.leirkWidth) {
+        tab.style.width = parseFloat(tab.style.width) + 19 + "px";
+        tab.dataset.leirkWidth = tab.style.width;
+      }
+    }
+  }, 1000);
 })();"#;
 
 impl App {
@@ -55,9 +79,44 @@ impl App {
         if self.inspector.as_ref().is_some_and(|i| i.tab == id) {
             return self.close_inspector();
         }
+        self.inspect_tab(id);
+    }
+
+    /// Right-click › "Inspecter" (WebView2's own DevTools window is disabled on pages).
+    pub(crate) unsafe fn inspect_menu(&self, core: &ICoreWebView2, id: TabId) -> windows::core::Result<()> {
+        let env = core.cast::<ICoreWebView2_2>()?.Environment()?.cast::<ICoreWebView2Environment9>()?;
+        let proxy = self.proxy.clone();
+        let mut tok = Default::default();
+        core.cast::<ICoreWebView2_11>()?.add_ContextMenuRequested(
+            &ContextMenuRequestedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let item = env.CreateContextMenuItem(w!("Inspecter"), None::<&windows::Win32::System::Com::IStream>, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND)?;
+                let p = proxy.clone();
+                let mut t = Default::default();
+                item.add_CustomItemSelected(
+                    &CustomItemSelectedEventHandler::create(Box::new(move |_, _| {
+                        let _ = p.send_event(Ev::InspectTab(id));
+                        Ok(())
+                    })),
+                    &mut t,
+                )?;
+                let items = args.MenuItems()?;
+                let mut n = 0;
+                items.Count(&mut n)?;
+                items.InsertValueAtIndex(n, &item)
+            })),
+            &mut tok,
+        )
+    }
+
+    /// Docks DevTools on `id` (kept open if they already are).
+    pub(crate) fn inspect_tab(&mut self, id: TabId) {
+        if self.inspector.as_ref().is_some_and(|i| i.tab == id) {
+            return;
+        }
         let Some(view) = self.views.get(&id) else { return };
         if self.debug_port.is_none() {
-            return view.open_devtools(); // developer mode off: the separate WebView2 window
+            return;
         }
         let proxy = self.proxy.clone();
         let Ok(core) = (unsafe { view.controller().CoreWebView2() }) else { return };
@@ -84,7 +143,7 @@ impl App {
             .with_browser_extensions_enabled(true)
             .with_url(&url)
             .with_visible(false)
-            .with_initialization_script(HOST_HOOK)
+            .with_initialization_script(&HOST_HOOK.replace("__ICON__", &format!("data:image/png;base64,{}", b64(include_bytes!("../assets/icon-64.png")))))
             .with_new_window_req_handler(move |u, _| match free.borrow_mut().take() {
                 // device_mode_emulation_frame.html (toolbox.html in older Chromium)
                 Some(webview) if ["device_mode_emulation_frame.html", "toolbox.html"].iter().any(|f| u.starts_with(&format!("devtools://devtools/bundled/{f}"))) => {

@@ -69,6 +69,8 @@ enum Ev {
     DevHello(String, TabId),
     /// DevTools target id of a tab, ready to dock the front end on it.
     Inspect(TabId, String),
+    /// Right-click › Inspecter on a page.
+    InspectTab(TabId),
     /// A call from the docked DevTools front end.
     InspectorHost(String),
     /// Time to collect the docked front end's queued calls.
@@ -130,6 +132,7 @@ fn write_devtools_extension(dir: &Path) -> PathBuf {
     ] {
         let _ = std::fs::write(ext.join(name), body);
     }
+    let _ = std::fs::write(ext.join("icon.png"), include_bytes!("../assets/icon-64.png")); // the "Leirk" tab icon
     root
 }
 
@@ -488,7 +491,7 @@ impl App {
             .with_url(&url)
             .with_incognito(private)
             .with_visible(false)
-            .with_devtools(true)
+            .with_devtools(false) // only Chromium's front end, docked by Leirk (F12, right-click › Inspecter)
             .with_initialization_script(&page_js)
             .with_ipc_handler(move |req| {
                 let body = req.body();
@@ -666,6 +669,7 @@ impl App {
 
         self.hook_keys(&ctrl)?;
         self.dev_hook(&core, id)?;
+        self.inspect_menu(&core, id)?;
 
         let proxy = self.proxy.clone();
         core.add_SourceChanged(
@@ -1047,7 +1051,7 @@ impl App {
             }
             "tracking" | "download_dir" => unsafe { self.apply_profile(&self.ui.webview()) },
             "ui_scale" => drop(self.ui.zoom(self.scale())),
-            "autoplay_block" | "gpu" | "dev_mode" => self.restart_needed = true,
+            "autoplay_block" | "gpu" => self.restart_needed = true,
             "passwords" | "autofill" => {
                 for v in self.views.values() {
                     unsafe {
@@ -1437,6 +1441,7 @@ impl App {
             }
             Ev::Navigate(id, url) => return self.navigate_tab(id, url),
             Ev::Inspect(id, target) => return self.open_inspector(id, target),
+            Ev::InspectTab(id) => return self.inspect_tab(id),
             Ev::InspectorHost(body) => return self.inspector_host(&body),
             Ev::InspectorPoll => return self.poll_inspector(),
             Ev::DevHello(nonce, id) => {
@@ -1626,9 +1631,9 @@ fn main() {
     if prefs["autoplay_block"].as_bool().unwrap_or(true) {
         args += " --autoplay-policy=document-user-activation-required";
     }
-    // Developer mode hosts Chromium's own DevTools front end (device mode, dock side) inside the window;
-    // it talks to the page over a loopback debugging port that only exists while developer mode is on.
-    let debug_port = prefs["dev_mode"].as_bool().unwrap_or(false).then(free_port).flatten();
+    // F12 hosts Chromium's own DevTools front end (device mode, dock side) inside the window;
+    // it talks to the page over this loopback debugging port.
+    let debug_port = free_port();
     if let Some(p) = debug_port {
         args += &format!(" --remote-debugging-port={p} --remote-allow-origins=devtools://devtools");
     }

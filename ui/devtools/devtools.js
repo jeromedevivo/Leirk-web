@@ -1,1 +1,1 @@
-chrome.devtools.panels.create("Leirk", "", "panel.html");
+chrome.devtools.panels.create("Leirk", "icon.png", "panel.html");

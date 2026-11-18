@@ -148,7 +148,9 @@ html[data-nodim] .tab.unloaded .fav, html[data-nodim] .tab.unloaded .title { fil
 .icon:hover { background: var(--hover); color: var(--ink); }
 .icon:active { background: var(--press); }
 .icon[disabled] { opacity: .35; pointer-events: none; }
-#newtab { margin: 0 4px 3px; }
+/* same centre line as the tabs' close buttons, a touch larger than them */
+#newtab { width: 24px; height: 24px; border-radius: 6px; margin: 0 4px calc((var(--tab-h) - 24px) / 2); }
+#newtab svg { width: 14px; height: 14px; }
 #win, #newtab { flex: none; }
 #drag { flex: 1 0 48px; align-self: stretch; }
 #win { display: flex; align-self: flex-start; }

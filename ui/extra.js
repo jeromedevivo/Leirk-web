@@ -239,7 +239,7 @@ SECTIONS.splice(SECTIONS.findIndex(s => s.id === "import"), 0,
   ]},
   { id: "sync", icon: "reload", title: "Synchronisation", items: [{ type: "sync" }] },
   { id: "dev", icon: "code", title: "Mode développeur", items: [
-    { k: "dev_mode", t: "Activer le mode développeur", d: "F12 ouvre les DevTools de Chromium dans la fenêtre, comme Brave : mode appareil, côté du dock, et l'onglet « Leirk » avec les modules choisis. Redémarrage nécessaire. Désactivé, rien ne tourne en arrière-plan.", type: "toggle" },
+    { k: "dev_mode", t: "Activer le mode développeur", d: "Ajoute l'onglet « Leirk » aux DevTools (F12) avec les modules choisis. Désactivé, l'onglet n'affiche rien et rien ne tourne en arrière-plan.", type: "toggle" },
     { h: "Modules" },
     { k: "dev_modules.js", t: "JavaScript en un clic", d: "Bouton JS dans l'onglet Leirk des DevTools pour couper ou réactiver les scripts du site.", type: "sub" },
     { k: "dev_modules.tech", t: "Technologies (Wappalyzer)", d: "Frameworks, CMS, serveurs, analytics… avec leurs versions.", type: "sub" },
