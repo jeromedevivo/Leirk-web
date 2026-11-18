@@ -227,4 +227,16 @@ mod tests {
     fn time_conversion() {
         assert_eq!(chromium_time_to_unix(11_644_473_600 * 1_000_000), 0);
     }
+
+    /// Reads the real browsers on this machine into throwaway stores: `cargo test -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn imports_installed_browsers() {
+        let mut history = History::open(Path::new(":memory:")).unwrap();
+        for src in sources() {
+            let mut profile = Profile::default();
+            let r = import(&src, &mut profile, &mut history);
+            println!("{:<28} {:>5} signets {:>7} historique {:>3} moteurs", src.name, r.bookmarks, r.history, r.engines);
+        }
+    }
 }
