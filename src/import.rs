@@ -3,6 +3,7 @@ use crate::omnibox::Engine;
 use crate::store::{Bookmark, History, Profile};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -194,6 +195,17 @@ pub fn import(src: &Source, profile: &mut Profile, history: &mut History) -> Rep
     r
 }
 
+/// Key under which a site's icon is stored: the host without `www.`.
+pub fn favicon_key(url: &str) -> String {
+    crate::shields::host(url).trim_start_matches("www.").to_string()
+}
+
+/// Icons from a Chromium `Favicons` database for the given hosts, as `data:image/png` URLs.
+/// Prefers the 32 px bitmap (sharp on high-DPI), then the closest size.
+pub fn chromium_favicons(db: &Connection, hosts: &HashSet<String>) -> HashMap<String, String> {
+    todo!()
+}
+
 /// Chromium stores times as microseconds since 1601-01-01; Firefox as microseconds since 1970.
 pub fn chromium_time_to_unix(t: i64) -> i64 {
     t / 1_000_000 - 11_644_473_600
@@ -226,6 +238,26 @@ mod tests {
         assert_eq!(chromium_search_url("{google:baseURL}search?q={searchTerms}"), None);
         assert_eq!(chromium_search_url("https://x.com/?q={searchTerms}&{google:RLZ}"), None);
         assert_eq!(chromium_search_url("https://x.com/home"), None);
+    }
+
+    #[test]
+    fn favicons_pick_32px_per_host() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE icon_mapping(id INTEGER PRIMARY KEY, page_url TEXT, icon_id INTEGER);
+             CREATE TABLE favicon_bitmaps(id INTEGER PRIMARY KEY, icon_id INTEGER, image_data BLOB, width INTEGER);
+             INSERT INTO icon_mapping(page_url, icon_id) VALUES ('https://www.twitch.tv/', 1), ('https://twitch.tv/dir', 1),
+               ('https://github.com/x', 2), ('https://other.com/', 3);
+             INSERT INTO favicon_bitmaps(icon_id, image_data, width) VALUES (1, x'0102', 16), (1, x'0304', 32),
+               (2, x'05', 16), (3, x'06', 32);",
+        )
+        .unwrap();
+        let want: HashSet<String> = ["twitch.tv", "github.com"].into_iter().map(String::from).collect();
+        let got = chromium_favicons(&db, &want);
+        assert_eq!(got.len(), 2, "only requested hosts");
+        assert_eq!(got["twitch.tv"], "data:image/png;base64,AwQ=", "32 px wins");
+        assert_eq!(got["github.com"], "data:image/png;base64,BQ==", "falls back to what exists");
+        assert_eq!(favicon_key("https://www.twitch.tv/x"), "twitch.tv");
     }
 
     #[test]

@@ -1,3 +1,4 @@
+pub mod b64;
 pub mod calc;
 pub mod import;
 pub mod omnibox;
