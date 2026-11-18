@@ -46,12 +46,59 @@ pub fn builtin_engines() -> Vec<Engine> {
 }
 
 pub fn encode(q: &str) -> String {
-    todo!()
+    let mut out = String::with_capacity(q.len());
+    for b in q.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+fn looks_like_url(s: &str) -> Option<&'static str> {
+    if s.contains(char::is_whitespace) {
+        return None;
+    }
+    let host_port = s.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host_port.split(':').next().unwrap_or("");
+    if host == "localhost" || host.parse::<std::net::Ipv4Addr>().is_ok() {
+        return Some("http://");
+    }
+    let tld = host.rsplit('.').next().unwrap_or("");
+    let ok = host.contains('.')
+        && !host.starts_with('.')
+        && tld.len() >= 2
+        && tld.chars().all(|c| c.is_ascii_alphabetic())
+        && host.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '.');
+    ok.then_some("https://")
 }
 
 /// What the user typed -> URL to load. `bang`-style `!kw query` and `kw query` both pick an engine.
 pub fn resolve(input: &str, engines: &[Engine], default_kw: &str) -> String {
-    todo!()
+    let s = input.trim();
+    if s.is_empty() {
+        return String::new();
+    }
+    let lower = s.to_ascii_lowercase();
+    if ["http://", "https://", "file://", "about:", "data:", "view-source:", "edge://"].iter().any(|p| lower.starts_with(p)) {
+        return s.to_string();
+    }
+    if let Some(scheme) = looks_like_url(s) {
+        return format!("{scheme}{s}");
+    }
+    let search = |e: &Engine, q: &str| e.url.replace("%s", &encode(q));
+    if let Some((kw, rest)) = s.split_once(char::is_whitespace) {
+        let kw = kw.strip_prefix('!').unwrap_or(kw);
+        if let Some(e) = engines.iter().find(|e| e.keyword.eq_ignore_ascii_case(kw)) {
+            return search(e, rest.trim());
+        }
+    }
+    let default = engines.iter().find(|e| e.keyword == default_kw).or(engines.first());
+    match default {
+        Some(e) => search(e, s),
+        None => format!("https://search.brave.com/search?q={}", encode(s)),
+    }
 }
 
 #[cfg(test)]
@@ -86,7 +133,7 @@ mod tests {
         assert_eq!(r("g rust"), "https://www.google.com/search?q=rust");
         assert_eq!(r("!yt lofi"), "https://www.youtube.com/results?search_query=lofi");
         assert_eq!(r("yt"), "https://search.brave.com/search?q=yt");
-        assert_eq!(r("!unknown x"), "https://search.brave.com/search?q=!unknown%20x");
+        assert_eq!(r("!unknown x"), "https://search.brave.com/search?q=%21unknown%20x");
     }
 
     #[test]

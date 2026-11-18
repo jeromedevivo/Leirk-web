@@ -46,54 +46,128 @@ impl Tabs {
     fn index(&self, id: TabId) -> Option<usize> {
         self.list.iter().position(|t| t.id == id)
     }
+    /// A stack needs two members; lone members fall back to normal tabs.
+    fn unstack_dangling(&mut self) {
+        let ids: Vec<_> = self.list.iter().filter_map(|t| t.stack).collect();
+        for t in &mut self.list {
+            if let Some(s) = t.stack {
+                if ids.iter().filter(|&&x| x == s).count() < 2 {
+                    t.stack = None;
+                }
+            }
+        }
+    }
 
     /// Opens a tab after `after` (or at the end) and returns its id. Does not activate it.
     pub fn open(&mut self, url: &str, private: bool, after: Option<TabId>) -> TabId {
-        todo!()
+        self.next_id += 1;
+        let id = self.next_id;
+        let tab = Tab { id, url: url.into(), private, ..Default::default() };
+        match after.and_then(|a| self.index(a)) {
+            Some(i) => self.list.insert(i + 1, tab),
+            None => self.list.push(tab),
+        }
+        id
     }
 
     pub fn activate(&mut self, id: TabId, now: u64) {
-        todo!()
+        if let Some(t) = self.get_mut(id) {
+            t.last_active = now;
+            self.active = id;
+        }
     }
 
     /// Closes a tab. Keeps at least one tab open and picks the right neighbour as new active.
     pub fn close(&mut self, id: TabId) {
-        todo!()
+        let Some(i) = self.index(id) else { return };
+        self.list.remove(i);
+        self.unstack_dangling();
+        self.tiled.retain(|&t| t != id);
+        if self.tiled.len() < 2 {
+            self.tiled.clear();
+        }
+        if self.list.is_empty() {
+            let n = self.open("", false, None);
+            self.active = n;
+        } else if self.active == id {
+            self.active = self.list[i.min(self.list.len() - 1)].id;
+        }
     }
 
     /// Tabs whose webview is on screen: the tiled set when the active tab is tiled, else the active tab.
     pub fn visible(&self) -> Vec<TabId> {
-        todo!()
+        if self.tiled.contains(&self.active) { self.tiled.clone() } else { vec![self.active] }
     }
 
     /// Puts `id` into the stack of `onto` (creating it) and moves it right after its stack.
     pub fn stack(&mut self, id: TabId, onto: TabId) {
-        todo!()
+        if id == onto || self.get(id).is_none() {
+            return;
+        }
+        let Some(target) = self.get(onto) else { return };
+        let sid = target.stack.unwrap_or(onto);
+        self.get_mut(onto).unwrap().stack = Some(sid);
+        let mut tab = self.list.remove(self.index(id).unwrap());
+        tab.stack = Some(sid);
+        let last = self.list.iter().rposition(|t| t.stack == Some(sid)).unwrap();
+        self.list.insert(last + 1, tab);
+        self.unstack_dangling();
     }
 
     pub fn unstack(&mut self, id: TabId) {
-        todo!()
+        if let Some(t) = self.get_mut(id) {
+            t.stack = None;
+        }
+        self.unstack_dangling();
     }
 
     pub fn move_to(&mut self, id: TabId, index: usize) {
-        todo!()
+        let Some(i) = self.index(id) else { return };
+        let tab = self.list.remove(i);
+        let index = index.min(self.list.len());
+        self.list.insert(index, tab);
     }
 
     /// Tiles 2..=4 tabs side by side; anything else clears tiling.
     pub fn tile(&mut self, ids: &[TabId]) {
-        todo!()
+        self.tiled = ids.iter().copied().filter(|&i| self.get(i).is_some()).take(4).collect();
+        if self.tiled.len() < 2 {
+            self.tiled.clear();
+        }
     }
 
     /// Loaded tabs to unload: idle longer than `idle_secs`, or the least recently used beyond `max_live`.
     /// Visible and audible tabs are never unloaded.
     pub fn unload_candidates(&self, max_live: usize, idle_secs: u64, now: u64) -> Vec<TabId> {
-        todo!()
+        let visible = self.visible();
+        let mut live: Vec<&Tab> = self.list.iter().filter(|t| t.loaded).collect();
+        let keep = |t: &Tab| visible.contains(&t.id) || t.audible;
+        // most recent first: everything past max_live (or idle) goes
+        live.sort_by(|a, b| b.last_active.cmp(&a.last_active));
+        let mut kept = live.iter().filter(|t| keep(t)).count();
+        let mut out = vec![];
+        for t in live.iter().filter(|t| !keep(t)) {
+            let idle = idle_secs > 0 && now.saturating_sub(t.last_active) > idle_secs;
+            if idle || kept >= max_live {
+                out.push(t.id);
+            } else {
+                kept += 1;
+            }
+        }
+        out
     }
 }
 
 /// Rects (x, y, w, h) for `n` tiled tabs: columns for 2-3, a 2x2 grid for 4.
 pub fn tile_rects(n: usize, w: f64, h: f64, gap: f64) -> Vec<(f64, f64, f64, f64)> {
-    todo!()
+    let (cols, rows) = match n {
+        0 | 1 => return vec![(0.0, 0.0, w, h)],
+        4 => (2, 2),
+        n => (n, 1),
+    };
+    let cw = (w - gap * (cols - 1) as f64) / cols as f64;
+    let rh = (h - gap * (rows - 1) as f64) / rows as f64;
+    (0..n).map(|i| (((i % cols) as f64) * (cw + gap), ((i / cols) as f64) * (rh + gap), cw, rh)).collect()
 }
 
 #[cfg(test)]

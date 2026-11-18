@@ -8,22 +8,33 @@ pub struct Shields {
 
 /// Host of a URL ("" when there is none). `www.` is kept: the site key is the exact host.
 pub fn host(url: &str) -> &str {
-    todo!()
+    let Some((_, rest)) = url.split_once("://") else { return "" };
+    let auth = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let auth = auth.rsplit('@').next().unwrap_or(auth);
+    auth.split(':').next().unwrap_or("")
 }
 
 impl Shields {
     pub fn new(rules: &str) -> Self {
-        todo!()
+        Shields { engine: adblock::Engine::new_with_list_text(rules), disabled_sites: HashSet::new() }
     }
 
     /// `kind` uses adblock request types: "script", "image", "stylesheet", "xmlhttprequest", "sub_frame", "other"...
     pub fn should_block(&self, url: &str, page_url: &str, kind: &str) -> bool {
-        todo!()
+        if self.disabled_sites.contains(host(page_url)) {
+            return false;
+        }
+        adblock::request::Request::new(url, page_url, kind, "GET")
+            .map(|r| self.engine.check_network_request(&r).should_block())
+            .unwrap_or(false)
     }
 
     /// Site-specific CSS selectors to hide on `url` (cosmetic filtering).
     pub fn hide_selectors(&self, url: &str) -> Vec<String> {
-        todo!()
+        if self.disabled_sites.contains(host(url)) {
+            return vec![];
+        }
+        self.engine.url_cosmetic_resources(url).hide_selectors.into_iter().collect()
     }
 }
 

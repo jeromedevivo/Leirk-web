@@ -59,11 +59,23 @@ pub fn save_json<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
 impl Profile {
     /// Adds bookmarks not already present (by URL); returns how many were added.
     pub fn merge_bookmarks(&mut self, new: Vec<Bookmark>) -> usize {
-        todo!()
+        let before = self.bookmarks.len();
+        for b in new {
+            if !self.bookmarks.iter().any(|x| x.url == b.url) {
+                self.bookmarks.push(b);
+            }
+        }
+        self.bookmarks.len() - before
     }
     /// Adds engines whose keyword and URL are both new; returns how many were added.
     pub fn merge_engines(&mut self, new: Vec<Engine>) -> usize {
-        todo!()
+        let before = self.engines.len();
+        for e in new {
+            if !self.engines.iter().any(|x| x.keyword.eq_ignore_ascii_case(&e.keyword) || x.url == e.url) {
+                self.engines.push(e);
+            }
+        }
+        self.engines.len() - before
     }
 }
 
@@ -90,17 +102,52 @@ impl History {
     }
 
     pub fn visit(&self, url: &str, title: &str, now: i64) -> rusqlite::Result<()> {
-        todo!()
+        self.db
+            .execute(
+                "INSERT INTO h(url,title,visits,last) VALUES(?1,?2,1,?3)
+                 ON CONFLICT(url) DO UPDATE SET visits=visits+1, last=?3,
+                   title=CASE WHEN ?2='' THEN title ELSE ?2 END",
+                params![url, title, now],
+            )
+            .map(|_| ())
+    }
+
+    pub fn set_title(&self, url: &str, title: &str) -> rusqlite::Result<()> {
+        self.db.execute("UPDATE h SET title=?2 WHERE url=?1 AND ?2<>''", params![url, title]).map(|_| ())
     }
 
     /// Bulk import (url, title, visits, last); keeps the larger visit count on conflict.
     pub fn import(&mut self, rows: &[(String, String, i64, i64)]) -> rusqlite::Result<usize> {
-        todo!()
+        let tx = self.db.transaction()?;
+        {
+            let mut st = tx.prepare(
+                "INSERT INTO h(url,title,visits,last) VALUES(?1,?2,?3,?4)
+                 ON CONFLICT(url) DO UPDATE SET visits=max(visits,?3), last=max(last,?4),
+                   title=CASE WHEN title='' THEN ?2 ELSE title END",
+            )?;
+            for (u, t, v, l) in rows {
+                st.execute(params![u, t, v, l])?;
+            }
+        }
+        tx.commit()?;
+        Ok(rows.len())
     }
 
     /// Entries whose URL or title contains every word of `q`, most visited first.
     pub fn search(&self, q: &str, limit: usize) -> Vec<Entry> {
-        todo!()
+        let words: Vec<String> = q
+            .split_whitespace()
+            .map(|w| format!("%{}%", w.replace('!', "!!").replace('%', "!%").replace('_', "!_")))
+            .collect();
+        let mut sql = String::from("SELECT url,title FROM h WHERE 1");
+        for i in 0..words.len() {
+            sql += &format!(" AND (url LIKE ?{0} ESCAPE '!' OR title LIKE ?{0} ESCAPE '!')", i + 1);
+        }
+        sql += &format!(" ORDER BY visits DESC, last DESC LIMIT {limit}");
+        let Ok(mut st) = self.db.prepare(&sql) else { return vec![] };
+        st.query_map(rusqlite::params_from_iter(words.iter()), |r| Ok(Entry { url: r.get(0)?, title: r.get(1)? }))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
     }
 
     pub fn top(&self, limit: usize) -> Vec<Entry> {
