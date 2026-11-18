@@ -174,7 +174,7 @@ The UI is one WebView2 covering the window; page WebViews sit on top of the cont
 
 ## Not in this version
 
-Rewards/BAT, crypto wallet, AI assistant, Tor windows, multiple windows. Extensions are installed from a Web Store link (no in-store \"Add to Chrome\" button). Saved passwords from other browsers can't be imported, because recent Chromium versions encrypt them with an app-bound key. WebView2 still offers to save new ones.
+Rewards/BAT, crypto wallet, AI assistant, Tor windows, multiple windows. Extensions are installed from a Web Store link (no in-store "Add to Chrome" button). Saved passwords from other browsers can't be imported, because recent Chromium versions encrypt them with an app-bound key. WebView2 still offers to save new ones.
 
 ## License
 
