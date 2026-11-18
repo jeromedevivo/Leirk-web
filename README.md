@@ -26,6 +26,8 @@ Mesures sur cette machine (Mo privés, Leirk + ses processus WebView2) :
 | Scénario | Leirk | Brave (profil vierge, mêmes sites) |
 |---|---|---|
 | 12 onglets restaurés au démarrage | **331 Mo**, 8 processus | — |
+| 51 onglets restaurés au démarrage | **340 Mo**, 9 processus | — |
+| 51 onglets, 2 en mosaïque | **383 Mo**, 9 processus | — |
 | 12 sites ouverts un par un (4 vivants) | ~1 550–1 700 Mo, 13 processus | ~1 975 Mo, 25 processus |
 
 Sur des sites lourds, l'essentiel restant est le processus GPU de WebView2. Les onglets vidéo qui jouent du son (YouTube, Twitch) ne sont volontairement jamais déchargés.
@@ -63,6 +65,10 @@ Sur des sites lourds, l'essentiel restant est le processus GPU de WebView2. Les 
 ## Pas dans cette version
 
 Rewards/BAT, Wallet, Leo, fenêtres Tor, synchronisation, extensions, gestionnaire de signets en arborescence (les signets se cherchent depuis F2), fenêtres multiples, popups liés à `window.opener` (ils s'ouvrent dans un nouvel onglet, ce qui peut gêner certaines connexions OAuth).
+
+## Diagnostic
+
+Les erreurs de l'interface et les commandes reçues sont écrites dans `%LOCALAPPDATA%\Leirk\leirk.log`.
 
 ## Code
 
