@@ -20,10 +20,62 @@ L.exts = list => {
   renderExtBar();
   if ($("#extList")) renderSettings(true);
 };
-function renderExtBar() {
-  $("#extbar").innerHTML = exts.filter(x => x.id && x.popup).map(x => `<button class="icon ext${sidePanel === "ext:" + x.id ? " on" : ""}" data-ext="${esc(x.id)}" title="${esc(x.name)}" aria-label="${esc(x.name)}">${x.icon ? `<img src="${esc(x.icon)}" alt="">` : icon("puzzle")}</button>`).join("");
+/* Brave's puzzle menu: every extension there, only the pinned ones on the toolbar. */
+// never set yet: everything stays pinned, as before the puzzle menu existed
+const pinned = () => P("ext_pinned") || exts.map(x => x.id).filter(Boolean);
+const storeId = u => (/^https:\/\/(chromewebstore\.google\.com\/detail\/|chrome\.google\.com\/webstore\/detail\/)/.test(u || "") && (u.match(/\/([a-p]{32})(?:[/?#]|$)/) || [])[1]) || null;
+function togglePin(id) { const p = pinned(); setPref("ext_pinned", p.includes(id) ? p.filter(x => x !== id) : [...p, id]); renderExtBar(); }
+function renderExtAdd() {
+  const id = storeId(S.url), b = $("#extadd");
+  b.hidden = !id || exts.some(x => x.dir === id);
 }
-$("#extbar").addEventListener("click", e => { const b = e.target.closest("[data-ext]"); if (b) { openPanel("ext:" + b.dataset.ext); renderExtBar(); } });
+$("#extadd").onclick = () => { send("extInstall", S.url); $("#extadd").hidden = true; };
+function openExtMenu() {
+  const box = $("#menu"), id = storeId(S.url), canAdd = id && !exts.some(x => x.dir === id);
+  const row = x => `<div class="xrow"><button class="row" role="menuitem" data-open="${esc(x.id)}" ${x.popup && x.id ? "" : "disabled"}>${x.icon ? `<img src="${esc(x.icon)}" alt="">` : icon("puzzle")}<span class="t">${esc(x.name)}</span></button>`
+    + (x.popup && x.id ? `<button class="icon${pinned().includes(x.id) ? " on" : ""}" data-pin="${esc(x.id)}" title="${pinned().includes(x.id) ? "Retirer de la barre d'outils" : "Épingler dans la barre d'outils"}" aria-pressed="${pinned().includes(x.id)}">${icon("pin")}</button>` : "")
+    + `<button class="icon" data-del="${esc(x.dir)}" data-id="${esc(x.id)}" title="Retirer ${esc(x.name)}" aria-label="Retirer ${esc(x.name)}">${icon("trash")}</button></div>`;
+  box.innerHTML = `<div class="xhead">Extensions</div>`
+    + (exts.length ? exts.map(row).join("") : `<div class="xhead" style="font-weight:400">Aucune extension installée.</div>`) + "<hr>"
+    + (canAdd ? `<button class="row" role="menuitem" data-act="add">${icon("plus")}<span class="t">Ajouter cette extension à Leirk</span></button>` : "")
+    + `<button class="row" role="menuitem" data-act="store">${icon("puzzle")}<span class="t">Parcourir le Chrome Web Store</span></button>`
+    + `<button class="row" role="menuitem" data-act="manage">${icon("gear")}<span class="t">Gérer les extensions</span></button>`;
+  box.onclick = e => {
+    const t = e.target.closest("[data-open],[data-pin],[data-del],[data-act]"); if (!t) return;
+    if (t.dataset.pin) { togglePin(t.dataset.pin); return openExtMenu(); }
+    if (t.dataset.del !== undefined) { removeExt(t.dataset.id, t.dataset.del); return closeAll(); }
+    closeAll();
+    if (t.dataset.open) openBubble(t.dataset.open, $(`#extbar [data-ext="${CSS.escape(t.dataset.open)}"]`) || $("#extmenu"));
+    else if (t.dataset.act === "add") send("extInstall", S.url);
+    else if (t.dataset.act === "store") send("open", "https://chromewebstore.google.com/category/extensions?hl=fr");
+    else if (t.dataset.act === "manage") openSettings("extensions");
+  };
+  show("menu", "#extmenu");
+  place("#menu", $("#extmenu"), false);
+  box.querySelector(".row")?.focus();
+}
+$("#extmenu").onclick = openExtMenu;
+function removeExt(id, dir) {
+  if (sidePanel === "ext:" + id) { sidePanel = null; send("panelClose"); renderPanelBar(); }
+  if (pinned().includes(id)) setPref("ext_pinned", pinned().filter(x => x !== id));
+  send("extRemove", { id, dir });
+}
+function renderExtBar() {
+  renderExtAdd();
+  $("#extbar").innerHTML = exts.filter(x => x.id && x.popup && pinned().includes(x.id)).map(x => `<button class="icon ext${bubbleId === x.id ? " on" : ""}" data-ext="${esc(x.id)}" title="${esc(x.name)}" aria-label="${esc(x.name)}">${x.icon ? `<img src="${esc(x.icon)}" alt="">` : icon("puzzle")}</button>`).join("");
+}
+/* Popups open as Chrome's bubble under the button (Rust side). A click anywhere in the chrome but on its own button
+   closes it; a click on its button toggles it. */
+let bubbleId = null;
+L.bubble = id => { bubbleId = id; renderExtBar(); };
+document.addEventListener("pointerdown", e => {
+  if (bubbleId && !e.target.closest(`#extbar [data-ext="${CSS.escape(bubbleId)}"]`)) send("extPopupClose");
+}, true);
+function openBubble(id, anchor) {
+  const r = anchor.getBoundingClientRect();
+  send("extPopup", { id, x: r.right, y: r.bottom });
+}
+$("#extbar").addEventListener("click", e => { const b = e.target.closest("[data-ext]"); if (b) openBubble(b.dataset.ext, b); });
 send("extList");
 const devOn = () => !!P("dev_mode");
 const mod = m => devOn() && (P("dev_modules") || {})[m] !== false;
@@ -58,6 +110,7 @@ function renderPanelBar() {
   }
   sendLayout();
 }
+L.panelClosed = () => { sidePanel = null; renderPanelBar(); renderExtBar(); };
 function openPanel(id) {
   if (sidePanel === id) { sidePanel = null; send("panelClose"); }
   else { sidePanel = id; $("#sidebody").innerHTML = ""; send("panelOpen", id); }
@@ -241,6 +294,7 @@ window.renderExtras = function () {
   if (sidePanel && sidePanel !== "dev" && !sidePanel.startsWith("ext:") && !panels().some(p => p.id === sidePanel)) sidePanel = null;
   refreshCommands();
   renderPanelBar();
+  renderExtAdd();
 };
 
 /* ---------- settings sections ---------- */
@@ -272,7 +326,7 @@ L.syncProviders = list => { syncProviders = list; if (openPop === "settings") re
 window.customItem = function (it) {
   if (it.type === "exts") {
     return `<div class="set col" id="extList"><div><div>Installez n'importe quelle extension du Chrome Web Store : Bitwarden, 1Password, Dark Reader, uBlock Origin Lite…</div>
-      <small>Ouvrez sa page sur chromewebstore.google.com, copiez l'adresse et collez-la ici. Son bouton apparaît ensuite dans la barre d'outils.</small></div>
+      <small>Ouvrez sa page sur chromewebstore.google.com et cliquez sur « Ajouter à Leirk » dans la barre d'adresse, ou collez son adresse ici. Elle apparaît ensuite dans le menu Extensions (icône puzzle), d'où vous pouvez l'épingler.</small></div>
       <div class="inline"><input class="in" id="extUrl" placeholder="https://chromewebstore.google.com/detail/…"><button class="btn" id="extAdd">Installer</button></div>
       ${exts.length ? exts.map(x => `<div class="drow">${x.icon ? `<span class="fav img pimg"><img src="${esc(x.icon)}" alt=""></span>` : icon("puzzle")}<span class="t">${esc(x.name)}</span><span class="k muted">${esc(x.version)}</span><button class="icon" data-ext-del="${esc(x.dir)}" data-ext-id="${esc(x.id)}" aria-label="Retirer ${esc(x.name)}">${icon("trash")}</button></div>`).join("") : `<small class="muted">Aucune extension installée.</small>`}</div>`;
   }
@@ -297,7 +351,7 @@ window.customItem = function (it) {
 $("#setbody").addEventListener("click", e => {
   if (e.target.id === "extAdd") { send("extInstall", $("#extUrl").value.trim()); $("#extUrl").value = ""; return; }
   const xd = e.target.closest("[data-ext-del]");
-  if (xd) { if (sidePanel === "ext:" + xd.dataset.extId) { sidePanel = null; send("panelClose"); renderPanelBar(); } return send("extRemove", { id: xd.dataset.extId, dir: xd.dataset.extDel }); }
+  if (xd) return removeExt(xd.dataset.extId, xd.dataset.extDel);
   const del = e.target.closest("[data-panel-del]");
   if (del) { removePanel(del.dataset.panelDel); return setTimeout(() => renderSettings(false), 100); }
   const s = e.target.closest("[data-sync]");
