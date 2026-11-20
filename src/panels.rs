@@ -102,6 +102,28 @@ pub(crate) fn app_windows() -> Vec<(isize, String, String)> {
     out
 }
 
+/// Extension popups run in their own WebView2, which Chromium sees as a window of its own: `tabs.query({active,
+/// currentWindow})` would return the popup itself (ColorZilla's eyedropper then targets its own popup). Point it
+/// at the Leirk tab the popup was opened over, as Chrome's toolbar popups see it. `__TAB__` is that tab's URL.
+pub(crate) const EXT_POPUP_JS: &str = r#"(function(){var T=__TAB__;if(!self.chrome||!chrome.tabs||!chrome.tabs.query)return;var q=chrome.tabs.query.bind(chrome.tabs);
+var web=function(t){return !/^(chrome-extension|about|edge|chrome):/.test(t.url||'')};
+chrome.tabs.query=function(info,cb){info=info||{};var p;
+ if(info.active||info.currentWindow||info.lastFocusedWindow||info.highlighted){p=new Promise(function(r){q({},r)}).then(function(all){
+  var m=all.filter(function(t){return t.url===T});if(!m.length)m=all.filter(web);return m.slice(0,1)})}
+ else p=new Promise(function(r){q(info,r)});
+ if(typeof cb==='function'){p.then(cb);return}return p};
+/* the popup is a plain view to WebView2 ("TAB"): say POPUP, as Chrome does, or Bitwarden and the like lay out as a full tab */
+var me=function(u){return String(u||'').split('#')[0]===location.href.split('#')[0]};
+if(chrome.runtime&&chrome.runtime.getContexts){var gc=chrome.runtime.getContexts.bind(chrome.runtime);
+ chrome.runtime.getContexts=function(f,cb){f=f||{};var g=Object.assign({},f);delete g.contextTypes;
+  var p=new Promise(function(r){gc(g,r)}).then(function(l){return (l||[]).map(function(c){return me(c.documentUrl)?Object.assign({},c,{contextType:'POPUP',tabId:-1,windowId:-1}):c})
+   .filter(function(c){return !f.contextTypes||f.contextTypes.indexOf(c.contextType)>=0})});
+  if(typeof cb==='function'){p.then(cb);return}return p}}
+if(chrome.tabs.getCurrent)chrome.tabs.getCurrent=function(cb){var p=Promise.resolve(undefined);if(typeof cb==='function'){p.then(cb);return}return p};
+if(chrome.extension&&chrome.extension.getViews){var gv=chrome.extension.getViews.bind(chrome.extension);
+ chrome.extension.getViews=function(o){var v=gv(o);if(o&&o.type==='popup'&&v.indexOf(window)<0)v=v.concat([window]);if(o&&o.type==='tab')v=v.filter(function(w){return w!==window});return v}}
+})();"#;
+
 fn hwnd(h: isize) -> HWND {
     HWND(h as *mut std::ffi::c_void)
 }
@@ -140,10 +162,14 @@ impl App {
         }
     }
 
-    fn open_web_panel(&mut self, id: &str, url: &str) {
+    fn open_web_panel(&mut self, id: &str, url: &str, init: Option<String>) {
         if !self.panel_views.contains_key(id) {
             let p = self.proxy.clone();
-            let built = WebViewBuilder::new_with_web_context(&mut self.ctx)
+            let mut builder = WebViewBuilder::new_with_web_context(&mut self.ctx);
+            if let Some(js) = &init {
+                builder = builder.with_initialization_script(js);
+            }
+            let built = builder
                 .with_additional_browser_args(&self.args)
                 .with_browser_extensions_enabled(true)
                 .with_url(url)
@@ -156,6 +182,16 @@ impl App {
             let Ok(view) = built else { return };
             unsafe {
                 let _ = self.hook_keys(&view.controller());
+                // window.close() in an extension popup (ColorZilla before picking) closes the panel, as Chrome closes the bubble
+                let (proxy, pid) = (self.proxy.clone(), id.to_string());
+                let mut tok = Default::default();
+                let _ = view.webview().add_WindowCloseRequested(
+                    &WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
+                        let _ = proxy.send_event(Ev::PanelClosed(pid.clone()));
+                        Ok(())
+                    })),
+                    &mut tok,
+                );
                 if let Ok(w15) = view.webview().cast::<ICoreWebView2_15>() {
                     let (proxy, key) = (self.proxy.clone(), favicon_key(url));
                     let mut tok = Default::default();
@@ -228,14 +264,16 @@ impl App {
                 if id == "dev" {
                     self.panel_open = Some(id);
                 } else if let Some(popup) = id.strip_prefix("ext:").and_then(|e| Some(format!("chrome-extension://{e}/{}", self.ext_popups.get(e)?))) {
-                    // an extension's popup (Bitwarden vault…) lives in the side panel
-                    self.open_web_panel(&id, &popup);
+                    // an extension's popup (Bitwarden vault…) lives in the side panel, fresh each time like Chrome's
+                    self.panel_views.remove(&id);
+                    let tab = self.tabs.get(self.tabs.active).map(|t| t.url.clone()).unwrap_or_default();
+                    self.open_web_panel(&id, &popup, Some(EXT_POPUP_JS.replace("__TAB__", &json!(tab).to_string())));
                     self.panel_open = Some(id);
                 } else if let Some(p) = self.panel(&id) {
                     let ok = if p["kind"] == "app" {
                         self.dock_app(&id, p["exe"].as_str().unwrap_or(""))
                     } else {
-                        self.open_web_panel(&id, p["url"].as_str().unwrap_or("about:blank"));
+                        self.open_web_panel(&id, p["url"].as_str().unwrap_or("about:blank"), None);
                         true
                     };
                     if ok {

@@ -34,6 +34,53 @@ pub fn crx_zip(crx: &[u8]) -> Option<&[u8]> {
     crx.get(start..).filter(|z| z.starts_with(b"PK"))
 }
 
+/// Prepended to every extension's background. Each WebView2 is a Chromium window of its own, so the extension popup
+/// (or Leirk's chrome) would be "the current window": point currentWindow/lastFocusedWindow, captureVisibleTab(null)
+/// and windows.getCurrent at the last focused window showing a web page, which is what Chrome's tab strip means.
+const SHIM: &str = r#"/* leirk-shim 1 */(function(){var c=self.chrome;if(!c||!c.tabs||!c.windows)return;
+var web=function(u){return /^(https?|file|ftp):/.test(u||'')},last=null;
+var note=function(w){if(w==null||w<0)return;c.tabs.query({windowId:w,active:true},function(t){void c.runtime.lastError;if(t&&t[0]&&web(t[0].url))last=w})};
+try{c.windows.onFocusChanged.addListener(note);c.tabs.onActivated.addListener(function(i){note(i.windowId)});c.tabs.onUpdated.addListener(function(id,ch,t){if(t&&t.active&&ch.url)note(t.windowId)})}catch(e){}
+var q=c.tabs.query.bind(c.tabs),cap=c.tabs.captureVisibleTab&&c.tabs.captureVisibleTab.bind(c.tabs),get=c.windows.get.bind(c.windows),gc=c.windows.getCurrent.bind(c.windows),gl=c.windows.getLastFocused.bind(c.windows);
+var win=function(){return new Promise(function(r){if(last!=null)return r(last);c.windows.getAll({populate:true},function(ws){void c.runtime.lastError;
+ var m=(ws||[]).filter(function(w){return (w.tabs||[]).some(function(t){return t.active&&web(t.url)})});var f=m.filter(function(w){return w.focused});r((f[0]||m[0]||{}).id)})})};
+var cb=function(p,f){if(typeof f==='function'){p.then(function(v){f(v)});return}return p};
+c.tabs.query=function(info,f){info=Object.assign({},info||{});if(!info.currentWindow&&!info.lastFocusedWindow)return cb(new Promise(function(r){q(info,r)}),f);
+ delete info.currentWindow;delete info.lastFocusedWindow;return cb(win().then(function(w){if(w!=null)info.windowId=w;return new Promise(function(r){q(info,r)})}),f)};
+if(cap)c.tabs.captureVisibleTab=function(w,o,f){if(typeof w!=='number'&&w!=null){f=o;o=w;w=null}if(typeof o==='function'){f=o;o={}}
+ return cb((w==null?win():Promise.resolve(w)).then(function(id){return new Promise(function(r){cap(id,o||{},r)})}),f)};
+var cur=function(orig){return function(o,f){if(typeof o==='function'){f=o;o={}}return cb(win().then(function(id){return new Promise(function(r){id==null?orig(o||{},r):get(id,o||{},r)})}),f)}};
+c.windows.getCurrent=cur(gc);c.windows.getLastFocused=cur(gl);
+})();/* /leirk-shim */
+"#;
+
+/// Puts [`SHIM`] in front of the extension's background (service worker or MV2 scripts). Idempotent; a newer shim
+/// replaces an older one. False when the extension has no background or its files cannot be written.
+pub fn patch_background(dir: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(dir.join("manifest.json")) else { return false };
+    let Ok(mut manifest) = serde_json::from_str::<Value>(&text) else { return false };
+    let bg = &manifest["background"];
+    if let Some(sw) = bg["service_worker"].as_str() {
+        let path = dir.join(sw.trim_start_matches('/'));
+        let Ok(js) = std::fs::read_to_string(&path) else { return false };
+        let rest = js.split_once("/* /leirk-shim */\n").map(|(_, r)| r).unwrap_or(&js);
+        let patched = format!("{SHIM}{rest}");
+        return patched == js || std::fs::write(&path, patched).is_ok();
+    }
+    if bg["scripts"].is_array() {
+        if std::fs::write(dir.join("leirk-shim.js"), SHIM).is_err() {
+            return false;
+        }
+        let list = manifest["background"]["scripts"].as_array_mut().unwrap();
+        if list.first().and_then(Value::as_str) != Some("leirk-shim.js") {
+            list.insert(0, Value::from("leirk-shim.js"));
+            return std::fs::write(dir.join("manifest.json"), serde_json::to_string_pretty(&manifest).unwrap_or_default()).is_ok();
+        }
+        return true;
+    }
+    false
+}
+
 /// Display information read from an unpacked extension folder.
 #[derive(Debug, PartialEq, Default)]
 pub struct Info {
@@ -110,6 +157,30 @@ mod tests {
         assert_eq!(crx_zip(&crx2), Some(&zip[..]));
         assert_eq!(crx_zip(b"PK\x03\x04plain zip"), None);
         assert_eq!(crx_zip(b"Cr24\x03\x00\x00\x00\xff\xff\xff\x7f"), None, "header longer than the file");
+    }
+
+    #[test]
+    fn background_shim_is_prepended_once() {
+        let dir = std::env::temp_dir().join(format!("leirk-shim-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), r#"{"background":{"service_worker":"/bg.js"}}"#).unwrap();
+        std::fs::write(dir.join("bg.js"), "work();\n").unwrap();
+        assert!(patch_background(&dir) && patch_background(&dir));
+        let js = std::fs::read_to_string(dir.join("bg.js")).unwrap();
+        assert_eq!(js.matches("leirk-shim 1").count(), 1);
+        assert!(js.ends_with("/* /leirk-shim */\nwork();\n"));
+        // an older shim is swapped for the current one
+        std::fs::write(dir.join("bg.js"), "/* leirk-shim 0 */old();/* /leirk-shim */\nwork();\n").unwrap();
+        assert!(patch_background(&dir));
+        assert!(!std::fs::read_to_string(dir.join("bg.js")).unwrap().contains("old()"));
+        // MV2: a script listed first
+        std::fs::write(dir.join("manifest.json"), r#"{"background":{"scripts":["a.js"]}}"#).unwrap();
+        assert!(patch_background(&dir) && patch_background(&dir));
+        let m: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(m["background"]["scripts"], serde_json::json!(["leirk-shim.js", "a.js"]));
+        std::fs::write(dir.join("manifest.json"), r#"{"name":"no background"}"#).unwrap();
+        assert!(!patch_background(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

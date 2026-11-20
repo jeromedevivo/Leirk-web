@@ -50,6 +50,13 @@ enum Ev {
     Launched(Vec<String>),
     /// Installed extensions for the chrome (list built off the UI thread).
     Exts(Value),
+    /// A Chrome Web Store page asked to install the extension at this URL.
+    ExtInstall(String),
+    /// A side panel's page called window.close() (an extension popup done with its job).
+    PanelClosed(String),
+    /// The extension bubble's content size.
+    BubbleSize(f64, f64),
+    BubbleClose,
     /// An extension was downloaded and unpacked: load it.
     ExtFetched(PathBuf),
     /// Extension install/remove finished, with the message to show.
@@ -217,6 +224,17 @@ if(__GPC__){try{Object.defineProperty(Navigator.prototype,'globalPrivacyControl'
 var post=function(m){try{window.ipc.postMessage(m)}catch(e){}};
 addEventListener('keydown',function(e){if((e.key==='F2'||e.key==='F6')&&!e.ctrlKey&&!e.altKey&&!e.shiftKey){e.preventDefault();post(e.key)}},true);
 if(!top)return;
+if(location.host==='chromewebstore.google.com'){
+ // the store's own button needs chrome.webstorePrivate, which only real Chromium browsers have: Leirk installs instead
+ var lab=/^(ajouter à|add to|añadir a|aggiungi a|adicionar ao|toevoegen aan) (chrome|brave|edge|microsoft edge)$|^zu (chrome|brave|edge) hinzufügen$/i;
+ var fix=function(){var bs=document.querySelectorAll('button');for(var i=0;i<bs.length;i++){var b=bs[i];
+  if(!b.__lk){if(!lab.test((b.textContent||'').trim()))continue;b.__lk=1;
+   var w=document.createTreeWalker(b,4),n;while(n=w.nextNode())if(lab.test(n.nodeValue.trim())){n.nodeValue='Ajouter à Leirk';break}}
+  if(b.disabled)b.disabled=false;if(b.getAttribute('aria-disabled')==='true')b.setAttribute('aria-disabled','false');if(b.style.pointerEvents!=='auto')b.style.pointerEvents='auto'}};
+ document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('button');if(b&&b.__lk){e.preventDefault();e.stopImmediatePropagation();post('ext:'+location.href)}},true);
+ var st=function(){fix();new MutationObserver(fix).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','aria-disabled']})};
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',st);else st();
+}
 window.__lg=__LG__;window.__rk=__RK__;
 var down=false,x=0,y=0,path='',moved=false,left=false,eat=false;
 addEventListener('mousedown',function(e){
@@ -371,6 +389,9 @@ struct App {
     panel_views: HashMap<String, WebView>,
     /// Extension popup pages by WebView2 extension id, opened as side panels ("ext:<id>").
     ext_popups: HashMap<String, String>,
+    /// The open extension popup bubble (extension id, view) and its anchor: the button's right edge and bottom.
+    ext_bubble: Option<(String, WebView)>,
+    bubble_at: (f64, f64),
     docked: HashMap<String, panels::Docked>,
     remote_tabs: Vec<Value>,
     sync_devices: Vec<Value>,
@@ -445,6 +466,9 @@ impl App {
         self.layout_panel();
         if self.overlay && !self.awaiting_backdrop {
             Self::raise(self.ui.hwnd());
+        }
+        if let Some((_, b)) = &self.ext_bubble {
+            Self::raise(b.hwnd()); // over the page, like Chrome's popup bubble
         }
         self.enforce_budget();
     }
@@ -522,6 +546,8 @@ impl App {
                     "F6" => Ev::Key("focus"),
                     b if b.starts_with("g:") && b.len() < 12 => Ev::Gesture(id, b[2..].to_string()),
                     b if b.starts_with("devhello:") && b.len() < 80 => Ev::DevHello(b[9..].to_string(), id),
+                    // only the store's own page may ask for an install; the store id is validated again by extInstall
+                    b if b.starts_with("ext:") && b.len() < 600 && host(&req.uri().to_string()) == "chromewebstore.google.com" => Ev::ExtInstall(b[4..].to_string()),
                     b if b.starts_with("c:") => {
                         let Ok(v) = serde_json::from_str::<Value>(&b[2..]) else { return };
                         let list = |k: &str| -> Vec<String> {
@@ -628,6 +654,16 @@ impl App {
                     Verdict::Block => args.SetResponse(&env.CreateWebResourceResponse(None, 403, w!("Blocked by Leirk Shields"), w!(""))?)?,
                 }
                 let _ = proxy.send_event(Ev::Blocked(id));
+                Ok(())
+            })),
+            &mut tok,
+        )?;
+
+        // a click on the page closes an extension's popup bubble, as in Chrome
+        let proxy = self.proxy.clone();
+        ctrl.add_GotFocus(
+            &FocusChangedEventHandler::create(Box::new(move |_, _| {
+                let _ = proxy.send_event(Ev::BubbleClose);
                 Ok(())
             })),
             &mut tok,
@@ -1614,6 +1650,19 @@ impl App {
                 return;
             }
             Ev::ExtFetched(path) => return self.ext_load(path),
+            Ev::BubbleSize(w, h) => self.size_bubble(w, h),
+            Ev::BubbleClose => self.close_bubble(),
+            Ev::PanelClosed(id) => {
+                self.panel_views.remove(&id);
+                if self.panel_open.as_deref() == Some(id.as_str()) {
+                    self.panel_open = None;
+                    self.js("L.panelClosed&&L.panelClosed()");
+                }
+                self.layout();
+            }
+            Ev::ExtInstall(url) => {
+                self.ext_command("extInstall", &Value::String(url));
+            }
             Ev::ExtDone(msg) => {
                 self.js(&format!("toast({})", json!(msg)));
                 return self.ext_list();
@@ -1770,6 +1819,7 @@ fn main() {
 
     let mut ctx = WebContext::new(Some(dir.join("WebView2")));
     let extensions = write_devtools_extension(&dir);
+    exthost::patch_all(&extensions);
     if let Some(api) = devapi::DevApi::start(proxy.clone()) {
         devapi::write_config(&extensions.join("leirk-devtools"), &api);
     }
@@ -1859,6 +1909,8 @@ fn main() {
         panel_open: None,
         panel_views: HashMap::new(),
         ext_popups: HashMap::new(),
+        ext_bubble: None,
+        bubble_at: (0.0, 0.0),
         docked: HashMap::new(),
         remote_tabs: vec![],
         sync_devices: vec![],
