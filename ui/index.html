@@ -95,16 +95,19 @@ html[data-max] #grip { display: none; }
 
 /* Tab row */
 #tabbar { display: flex; align-items: flex-end; height: var(--bar-h); padding: 0 0 0 8px; }
-#tabs { display: flex; flex: 0 1 auto; min-width: 0; gap: 2px; align-items: flex-end; height: 100%; padding-top: 6px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
-#tabs::-webkit-scrollbar { display: none; }
+#tabs { display: flex; flex: 0 1 auto; min-width: 0; gap: 2px; align-items: flex-end; height: 100%; padding-top: 6px; overflow-x: auto; overflow-y: hidden; }
+/* thin, only when the tabs overflow (no scrollbar-width: Chromium would ignore these rules) */
+#tabs::-webkit-scrollbar { height: 4px; }
+#tabs::-webkit-scrollbar-thumb { background: var(--ink-3); border-radius: 2px; }
+#tabs::-webkit-scrollbar-track { background: transparent; }
 .tab {
   position: relative; display: flex; align-items: center; gap: 8px; height: var(--tab-h); padding: 0 6px 0 10px;
-  flex: 0 1 auto; width: 232px; min-width: 40px; border-radius: var(--r) var(--r) 0 0; color: var(--ink-2);
+  flex: 0 1 auto; width: 232px; min-width: 32px; container-type: inline-size; border-radius: var(--r) var(--r) 0 0; color: var(--ink-2);
   transition: background-color .15s var(--ease);
 }
 .tab:hover { background: var(--hover); }
 .tab.active { background: var(--raised); color: var(--ink); }
-.tab.pinned { flex: 0 0 40px; width: 40px; padding: 0; justify-content: center; }
+.tab.pinned { flex: 0 0 40px; width: 40px; min-width: 40px; padding: 0; justify-content: center; }
 .tab.pinned .title, .tab.pinned .x { display: none; }
 .tab.sel { box-shadow: inset 0 0 0 1.5px var(--ember); }
 .tab.drop-in { background: var(--ember-soft); }
@@ -139,10 +142,9 @@ html[data-nodim] .tab.unloaded .fav, html[data-nodim] .tab.unloaded .title { fil
 .x svg { width: 12px; height: 12px; }
 .tab:hover .x, .tab.active .x, html[data-closeall] .tab .x { opacity: 1; }
 .x:hover { background: var(--press); color: var(--ink); }
+/* too narrow for the close button: keep the full-size logo and whatever fits of the title */
+@container (max-width: 64px) { .tab .x, .tab .badge, .tab .snd { display: none; } }
 .tab.priv .fav { background: oklch(0.45 0.12 285); color: white; }
-.tab.narrow { padding: 0; justify-content: center; gap: 0; }
-.tab.narrow .title, .tab.narrow .badge, .tab.narrow .snd, .tab.narrow .x { display: none; }
-.tab.narrow.active .x { display: grid; } .tab.narrow.active .fav { display: none; }
 
 .icon { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; color: var(--ink-2); flex: none; transition: background-color .12s; }
 .icon:hover { background: var(--hover); color: var(--ink); }
@@ -687,7 +689,6 @@ function renderTabs() {
   }
   const box = $("#tabs");
   box.innerHTML = out.join("");
-  box.querySelectorAll(".tab").forEach(el => el.classList.toggle("narrow", el.offsetWidth < 90));
   box.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   const sb = $("#stackbar"), inStack = activeTab && activeTab.stack != null;
   sb.classList.toggle("on", !!inStack);
@@ -858,7 +859,7 @@ function renderBookmarksBar() {
   if (show) {
     const tops = []; const seenF = new Set();
     for (const b of BM) {
-      if (!b.folder) tops.push(`<button class="bm" data-url="${esc(b.url)}" data-title="${esc(b.title || hostOf(b.url))}" title="${esc(b.title + "\n" + b.url)}">${fav(b)}<span>${esc(b.title || hostOf(b.url))}</span></button>`);
+      if (!b.folder) tops.push(`<button class="bm" data-url="${esc(b.url)}" data-title="${esc(b.title || hostOf(b.url))}" title="${esc(b.title + "\n" + b.url)}">${fav(b)}${b.title ? `<span>${esc(b.title)}</span>` : ""}</button>`);
       else { const f = topFolder(b.folder); if (!seenF.has(f)) { seenF.add(f); tops.push(`<button class="bm" data-folder="${esc(f)}">${icon("folder")}<span>${esc(f)}</span></button>`); } }
     }
     bar.innerHTML = (tops.length ? tops.join("") : `<span class="bm" style="color:var(--ink-3);max-width:none">Ajoutez des favoris avec l'étoile ou Ctrl+D, ou importez-les depuis un autre navigateur.</span>`)

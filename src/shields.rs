@@ -1,7 +1,15 @@
 //! Shields: Brave's own adblock-rust engine with Brave's list catalog, scriptlet resources,
 //! redirects, generic and site cosmetic filtering, and per-site opt-out.
+use adblock::lists::{FilterSet, ParseOptions};
+use adblock::resources::{PermissionMask, Resource};
 use serde_json::Value;
 use std::collections::HashSet;
+
+/// uBlock Origin's scriptlets and redirect payloads, built by scripts/ubo-resources.mjs. Brave's published
+/// resources.json only carries Brave's extras, so without these no `+js(...)` filter (YouTube's included) would run.
+const UBO_RESOURCES: &str = include_str!("../assets/ubo-resources.json");
+/// The permission uBO's `trusted-*` scriptlets require (see the script above).
+const TRUSTED: PermissionMask = PermissionMask::from_bits(1);
 
 /// Procedural cosmetic filters (`:has-text`, `:upward`, `:remove()`…), applied in the page like Brave's content script.
 /// `__P__` is replaced by the JSON list adblock-rust returns; filters with an unknown operator are skipped, never guessed.
@@ -76,6 +84,34 @@ const AGGRESSIVE: &[&str] = &[
 /// Scriptlets and redirect payloads, as Brave ships them.
 pub const RESOURCES_URL: &str = "https://raw.githubusercontent.com/brave/adblock-resources/master/dist/resources.json";
 
+/// Is `url` one of Leirk's own lists (trusted, like uBO's and Brave's defaults), not one the user added?
+pub fn is_builtin(url: &str) -> bool {
+    let expand = |u: &str| u.replace("{ubo}", UBO).replace("{brave}", BRAVE);
+    LISTS.iter().flat_map(|l| l.urls).map(|u| expand(u)).chain(AGGRESSIVE.iter().map(|u| u.to_string())).any(|u| u == url)
+}
+
+/// adblock-rust drops `$popup` filters; keep them, minus that option, for a separate engine that judges window.open targets.
+fn popup_rules(text: &str) -> String {
+    let mut out = String::new();
+    for l in text.lines().map(str::trim) {
+        if l.starts_with('!') || ["##", "#@#", "#?#", "#$#", "#%#"].iter().any(|c| l.contains(c)) {
+            continue;
+        }
+        let Some((pat, opts)) = l.rsplit_once('$') else { continue };
+        let kept: Vec<&str> = opts.split(',').filter(|o| !matches!(*o, "popup" | "popunder")).collect();
+        if pat.is_empty() || kept.len() == opts.split(',').count() {
+            continue;
+        }
+        out.push_str(pat);
+        if !kept.is_empty() {
+            out.push('$');
+            out.push_str(&kept.join(","));
+        }
+        out.push('\n');
+    }
+    out
+}
+
 /// Every list URL the prefs enable, in order, without duplicates.
 pub fn list_urls(prefs: &Value) -> Vec<String> {
     let level = prefs["shields_level"].as_str().unwrap_or("standard");
@@ -114,6 +150,7 @@ pub enum Verdict {
 
 pub struct Shields {
     engine: adblock::Engine,
+    popups: adblock::Engine,
     pub disabled_sites: HashSet<String>,
 }
 
@@ -126,16 +163,41 @@ pub fn host(url: &str) -> &str {
 }
 
 impl Shields {
+    /// Untrusted rules only (the user's own).
     pub fn new(rules: &str) -> Self {
-        Shields { engine: adblock::Engine::new_with_list_text(rules), disabled_sites: HashSet::new() }
+        Self::from_lists("", rules)
     }
 
-    /// Loads Brave's `resources.json` (scriptlets and redirect targets). Invalid JSON is ignored.
+    /// `trusted` rules may inject `trusted-*` scriptlets, `other` rules may not.
+    pub fn from_lists(trusted: &str, other: &str) -> Self {
+        let mut set = FilterSet::new(false);
+        set.add_filter_list(trusted.to_string(), ParseOptions { permissions: TRUSTED, ..Default::default() });
+        set.add_filter_list(other.to_string(), ParseOptions::default());
+        let mut engine = adblock::Engine::new_with_filter_set(set);
+        engine.use_resources(Self::ubo_resources());
+        let popups = adblock::Engine::new_with_list_text(popup_rules(trusted) + &popup_rules(other));
+        Shields { engine, popups, disabled_sites: HashSet::new() }
+    }
+
+    fn ubo_resources() -> Vec<Resource> {
+        serde_json::from_str(UBO_RESOURCES).unwrap_or_default()
+    }
+
+    /// Adds Brave's `resources.json` to uBO's resources. Invalid JSON is ignored.
     pub fn with_resources(mut self, json: &str) -> Self {
-        if let Ok(r) = serde_json::from_str::<Vec<adblock::resources::Resource>>(json) {
-            self.engine.use_resources(r);
+        if let Ok(r) = serde_json::from_str::<Vec<Resource>>(json) {
+            self.engine.use_resources(Self::ubo_resources().into_iter().chain(r));
         }
         self
+    }
+
+    /// Should a window.open from `page_url` to `url` be refused (`$popup` filters: popunders, ad tabs)?
+    pub fn block_popup(&self, url: &str, page_url: &str) -> bool {
+        if self.disabled_sites.contains(host(page_url)) {
+            return false;
+        }
+        let Ok(req) = adblock::request::Request::new(url, page_url, "other", "GET") else { return false };
+        self.popups.check_network_request(&req).should_block()
     }
 
     /// `kind` uses adblock request types: "script", "image", "stylesheet", "xmlhttprequest", "sub_frame", "other"...
@@ -301,6 +363,33 @@ mod tests {
         let got = s.generic_selectors("https://x.com/", &["ad-slot".into(), "nav".into()], &["sponsor".into()]);
         assert!(got.contains(&".ad-slot".to_string()) && got.contains(&"#sponsor".to_string()), "{got:?}");
         assert!(s.generic_selectors("https://ok.com/", &["ad-slot".into()], &[]).is_empty(), "site exception wins");
+    }
+
+    #[test]
+    fn popup_filters_judge_window_open() {
+        let s = Shields::new("||popads.net^$popup,third-party\n||ads.com^\n@@||popads.net/ok$popup");
+        assert!(s.block_popup("https://popads.net/x", "https://site.com/"));
+        assert!(!s.block_popup("https://popads.net/ok", "https://site.com/"));
+        assert!(!s.block_popup("https://ads.com/", "https://site.com/"), "plain filters never block a new tab");
+        assert!(!s.block_popup("https://other.com/", "https://site.com/"));
+    }
+
+    #[test]
+    fn trusted_scriptlets_only_from_builtin_lists() {
+        let res = r#"[{"name":"trusted-x.js","aliases":[],"kind":{"mime":"application/javascript"},"content":"ZnVuY3Rpb24gdHJ1c3RlZFgoKXt9","dependencies":[],"permission":1}]"#;
+        let js = |s: Shields| s.with_resources(res).document_script("https://yt.com/").unwrap_or_default();
+        assert!(js(Shields::from_lists("yt.com##+js(trusted-x)", "")).contains("trustedX"));
+        assert!(!js(Shields::from_lists("", "yt.com##+js(trusted-x)")).contains("trustedX"));
+        assert!(is_builtin("https://easylist.to/easylist/easylist.txt"));
+        assert!(!is_builtin("https://example.com/list.txt"));
+    }
+
+    #[test]
+    fn ubo_scriptlets_and_redirects_are_bundled() {
+        let s = Shields::from_lists("www.youtube.com##+js(trusted-rpfr, '\"adPlacements\"', '\"no_ads\"', player?)\n||ads.com/x.js$script,redirect=noopjs", "");
+        let js = s.document_script("https://www.youtube.com/watch?v=x").expect("YouTube scriptlet");
+        assert!(js.contains("adPlacements") && js.contains("function"), "trusted uBO scriptlet injected");
+        assert!(matches!(s.check("https://ads.com/x.js", "https://site.com/", "script"), Verdict::Redirect(_)));
     }
 
     #[test]

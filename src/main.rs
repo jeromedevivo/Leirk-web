@@ -6,7 +6,7 @@ use leirk::calc::calculate;
 use leirk::import::{self, favicon_key};
 use leirk::omnibox::{resolve, Engine};
 use leirk::privacy::{https_upgrade, strip_tracking};
-use leirk::shields::{host, list_urls, Shields, Verdict, RESOURCES_URL};
+use leirk::shields::{host, is_builtin, list_urls, Shields, Verdict, RESOURCES_URL};
 use leirk::store::{self, merged_prefs, Bookmark, History, Profile};
 use leirk::tabs::{tile_rects, CloseFocus, Tab, TabId, Tabs};
 use serde_json::{json, Value};
@@ -111,6 +111,11 @@ fn shortcut(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'static str>
         (true, true, false, _) if key == 'T' => "reopen",
         (true, true, false, _) if key == 'B' => "toggleBar",
         (true, true, false, _) if key == 'S' => "capture",
+        // reloads always target the page: left to WebView2, they would reload whichever view has focus, Leirk's chrome included
+        (true, false, false, _) if key == 'R' => "reload",
+        (false, false, false, 0x74) => "reload", // F5
+        (true, true, false, _) if key == 'R' => "hardReload",
+        (_, true, false, 0x74) | (true, _, false, 0x74) => "hardReload", // Shift+F5, Ctrl+F5
         (true, false, false, 0x09) => "next",
         (true, true, false, 0x09) => "prev",
         (true, false, false, 0x22) => "next", // Ctrl+PageDown
@@ -276,11 +281,16 @@ fn load_shields(dir: PathBuf, urls: Vec<String>, custom: String, generation: u64
             })
             .collect();
         let loaded = texts.iter().filter(|t| t.is_some()).count();
-        let mut all: String = texts.into_iter().flatten().collect::<Vec<_>>().join("\n");
-        all.push('\n');
-        all.push_str(&custom);
+        // built-in lists may use trusted scriptlets (YouTube needs them); the user's own lists and rules may not
+        let (mut trusted, mut other) = (String::new(), custom);
+        for (u, t) in urls.iter().zip(texts) {
+            let Some(t) = t else { continue };
+            let into = if is_builtin(u) { &mut trusted } else { &mut other };
+            into.push('\n');
+            into.push_str(&t);
+        }
         let res = fetch(RESOURCES_URL, &dir).unwrap_or_default();
-        let _ = proxy.send_event(Ev::ShieldsReady(Shields::new(&all).with_resources(&res), generation, loaded));
+        let _ = proxy.send_event(Ev::ShieldsReady(Shields::from_lists(&trusted, &other).with_resources(&res), generation, loaded));
     });
 }
 
@@ -293,6 +303,8 @@ struct Shared {
     http_only: RefCell<HashSet<String>>,
     /// Developer mode: main document headers (technology detection).
     doc_headers: RefCell<HashMap<TabId, Vec<(String, String)>>>,
+    /// Tabs whose pending window.open was judged an ad popup (or not user-initiated) by the native hook.
+    popup_deny: RefCell<HashSet<TabId>>,
 }
 
 impl Shared {
@@ -486,6 +498,7 @@ impl App {
         let container = tab.container.as_ref().filter(|_| !tab.private).map(|n| n.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(32).collect::<String>()).filter(|n| !n.is_empty());
         let (url, private) = (tab.url.clone(), tab.private);
         let (p1, p2, p3, p4) = (self.proxy.clone(), self.proxy.clone(), self.proxy.clone(), self.proxy.clone());
+        let shared = self.shared.clone();
         let page_js = PAGE_JS
             .replace("__GPC__", if self.pref_on("gpc") { "true" } else { "false" })
             .replace("__LG__", if self.pref_on("gestures") { "true" } else { "false" })
@@ -526,7 +539,15 @@ impl App {
             .with_on_page_load_handler(move |e, u| {
                 let _ = p2.send_event(Ev::Loaded(id, matches!(e, PageLoadEvent::Finished), u));
             })
-            .with_new_window_req_handler(move |u, _| {
+            .with_new_window_req_handler(move |u, f| {
+                if shared.popup_deny.borrow_mut().remove(&id) {
+                    let _ = p3.send_event(Ev::Blocked(id));
+                    return NewWindowResponse::Deny;
+                }
+                // sized window.open = sign-in popup (Google, Apple…): it needs window.opener to hand the login back
+                if f.size.is_some() {
+                    return NewWindowResponse::Allow;
+                }
                 let _ = p3.send_event(Ev::NewTab(u));
                 NewWindowResponse::Deny
             })
@@ -607,6 +628,24 @@ impl App {
                     Verdict::Block => args.SetResponse(&env.CreateWebResourceResponse(None, 403, w!("Blocked by Leirk Shields"), w!(""))?)?,
                 }
                 let _ = proxy.send_event(Ev::Blocked(id));
+                Ok(())
+            })),
+            &mut tok,
+        )?;
+
+        // Popups: WebView2 has no popup blocker. Runs after wry's handler, which defers its decision to the message loop.
+        let shared = self.shared.clone();
+        core.add_NewWindowRequested(
+            &NewWindowRequestedEventHandler::create(Box::new(move |sender, args| {
+                let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
+                let mut user = BOOL::default();
+                args.IsUserInitiated(&mut user)?;
+                let url = pwstr(|p| args.Uri(p));
+                let page = pwstr(|p| sender.Source(p));
+                let ad = shared.shields.try_borrow().ok().is_some_and(|g| g.as_ref().is_some_and(|s| s.block_popup(&url, &page)));
+                if ad || !user.as_bool() {
+                    shared.popup_deny.borrow_mut().insert(id);
+                }
                 Ok(())
             })),
             &mut tok,
@@ -1173,6 +1212,8 @@ impl App {
             "back" => self.with_active(|w| unsafe { w.GoBack() }),
             "forward" => self.with_active(|w| unsafe { w.GoForward() }),
             "reload" => self.with_active(|w| unsafe { w.Reload() }),
+            // Ctrl+Shift+R: reload bypassing the cache, as in Chrome (cookies are kept there too)
+            "hardReload" => self.with_active(|w| unsafe { w.CallDevToolsProtocolMethod(w!("Page.reload"), w!(r#"{"ignoreCache":true}"#), None) }),
             "stop" => self.with_active(|w| unsafe { w.Stop() }),
             "downloads" => self.with_active(|w| unsafe { w.cast::<ICoreWebView2_9>()?.OpenDefaultDownloadDialog() }),
             "stack" => {
@@ -1794,6 +1835,7 @@ fn main() {
             upgraded: RefCell::new(HashMap::new()),
             http_only: RefCell::new(HashSet::new()),
             doc_headers: RefCell::new(HashMap::new()),
+            popup_deny: RefCell::new(HashSet::new()),
         }),
         shields_gen: 0,
         lists_loaded: 0,
@@ -1914,6 +1956,10 @@ mod tests {
         assert_eq!(shortcut('T' as u32, true, false, false), Some("newtab"));
         assert_eq!(shortcut('T' as u32, true, true, false), Some("reopen"));
         assert_eq!(shortcut('B' as u32, true, true, false), Some("toggleBar"));
+        assert_eq!(shortcut('R' as u32, true, false, false), Some("reload"));
+        assert_eq!(shortcut('R' as u32, true, true, false), Some("hardReload"));
+        assert_eq!(shortcut(0x74, false, true, false), Some("hardReload"));
+        assert_eq!(shortcut(0x74, false, false, false), Some("reload"));
         assert_eq!(shortcut('3' as u32, true, false, false), Some("tab3"));
         assert_eq!(shortcut(0x71, false, false, false), Some("palette"));
         assert_eq!(shortcut(0x7B, false, false, false), Some("devtools"), "F12 docks DevTools instead of WebView2's own window");
